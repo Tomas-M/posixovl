@@ -1,0 +1,24 @@
+
+Usage:
+	mount.vfat-x /vfat [fuseopts] /mnt
+
+Supports:
+	chmod
+	chown
+	mkfifo
+	mknod
+	symlink/readlink
+
+Does not support:
+	ACLs/xattrs
+	Hard links
+
+Terminology:
+	Virtual file: /mnt/foo.txt
+	Real file: /vfat/foo.txt
+	Special file: /vfat/.vfatx.foo.txt
+
+Notes:
+	If no special file exists for a file or/directory, the default
+	permissions are 644 or 755, respectively. The owner and group of the
+	inode will be the owner/group of the real file.
