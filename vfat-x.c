@@ -380,7 +380,7 @@ static int vfatx_access(const char *path, int mode)
 
 		XRET(access(real_path, mode));
 	} else if (ret < 0) {
-		return -ret;
+		return ret;
 	}
 
 	return generic_permission(&info, mode);
