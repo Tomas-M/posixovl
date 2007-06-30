@@ -639,8 +639,6 @@ static int vfatx_readlink(const char *path, char *dest, size_t size)
 	if (virtual_to_special(spec_path, path))
 		return -ENAMETOOLONG;
 	ret = special_lookup(spec_path, &info);
-	if (ret == -ENOENT)
-		return -EINVAL; /* not a symbolic link */
 	if (ret < 0)
 		return ret;
 	if ((info.mode & S_IFMT) != S_IFLNK)
