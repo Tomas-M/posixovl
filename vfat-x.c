@@ -797,7 +797,7 @@ static int vfatx_utimens(const char *path, const struct timespec *ts)
 			/* See if there is a special file */
 			ret = utimes(spec_path, &tv);
 
-	return (ret < 0) ? -errno : 0;
+	XRET(ret);
 }
 
 static int vfatx_write(const char *path, const char *buffer, size_t size,
