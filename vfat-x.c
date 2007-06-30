@@ -47,8 +47,6 @@
 	static_cast(unsigned long, ((minor) & 0xFF) | \
 	(((minor) & 0xFFF00) << 12) | (((major) & 0xFFF) << 8))
 
-/* Filename transformations */
-
 /* Buggers */
 #define should_not_happen() \
 	do { \
@@ -67,6 +65,9 @@
 	})
 
 /* Definitions */
+#define HCB_PREFIX     ".vfatx."
+#define HCB_PREFIX_LEN (sizeof(HCB_PREFIX) - 1)
+
 struct hcb {
 	char buf[PATH_MAX], tbuf[PATH_MAX];
 	char *s_mode, *s_uid, *s_gid, *s_rdev, *s_target;
@@ -131,7 +132,7 @@ static int __real_to_hcb(char *dest, size_t destsize, const char *src)
 	 */
 	ret = fstatat(root_fd, at(src), &sb, AT_SYMLINK_NOFOLLOW);
 	if (ret == 0 && S_ISDIR(sb.st_mode)) {
-		ret = snprintf(dest, destsize, "%s/.vfatx.", src);
+		ret = snprintf(dest, destsize, "%s/" HCB_PREFIX, src);
 		if (ret > destsize)
 			return -ENAMETOOLONG;
 		return 0;
@@ -141,7 +142,7 @@ static int __real_to_hcb(char *dest, size_t destsize, const char *src)
 	if (filename_part++ == NULL)
 		should_not_happen();
 
-	ret = snprintf(dest, destsize, "%.*s.vfatx.%s",
+	ret = snprintf(dest, destsize, "%.*s" HCB_PREFIX "%s",
 	      filename_part - directory_part, directory_part,
 	      filename_part);
 	if (ret > destsize)
@@ -331,7 +332,7 @@ static unsigned int is_hcb(const char *path)
 	const char *file = strrchr(path, '/');
 	if (file++ == NULL)
 		should_not_happen();
-	return strncmp(file, ".vfatx.", 7) == 0;
+	return strncmp(file, HCB_PREFIX, HCB_PREFIX_LEN) == 0;
 }
 
 static int generic_permission(struct hcb *info, unsigned int mask)
@@ -393,7 +394,7 @@ static inline unsigned int could_be_too_long(const char *path)
 {
 	/* Longest possible case is S_ISDIR: /root/path/.vfatx. */
 	return strlen(root_dir) + strlen(path) +
-	       sizeof("/.vfatx.") - 1 >= PATH_MAX;
+	       1 + HCB_PREFIX_LEN >= PATH_MAX;
 }
 
 static int vfatx_create(const char *path, mode_t mode,
@@ -568,7 +569,7 @@ static int vfatx_readdir(const char *path, void *buffer,
 	memset(&sb, 0, sizeof(sb));
 	while ((dentry = readdir(ptr)) != NULL) {
 		sb.st_ino = dentry->d_ino;
-		if (strncmp(dentry->d_name, ".vfatx.", 7) == 0) {
+		if (strncmp(dentry->d_name, HCB_PREFIX, HCB_PREFIX_LEN) == 0) {
 			/*
 			 * If a HCB is found, return its real name, but return
 			 * the attributes stored in the HCB.
