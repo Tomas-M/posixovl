@@ -764,6 +764,8 @@ static int vfatx_truncate(const char *path, off_t length)
 		 * files (e.g. /dev/null) returns -EINVAL.
 		 */
 		return -EINVAL;
+	} else if (fd < 0) {
+		return -errno;
 	}
 
 	ret = ftruncate(fd, length);
