@@ -56,8 +56,8 @@
 		        __FILE__, __LINE__); \
 		abort(); \
 	} while (0);
-#define special_file_got_busted(path) \
-	fprintf(stderr, "Special file %s got busted\n", (path))
+#define hcb_got_busted(path) \
+	fprintf(stderr, "HCB %s got busted\n", (path))
 
 /* Shortcut */
 #define XRET(v) \
@@ -67,7 +67,7 @@
 	})
 
 /* Definitions */
-struct special_info {
+struct hcb {
 	char buf[PATH_MAX], tbuf[PATH_MAX];
 	char *s_mode, *s_uid, *s_gid, *s_rdev, *s_target;
 	mode_t mode;
@@ -114,9 +114,9 @@ static __attribute__((pure)) const char *at(const char *in)
 }
 
 /*
- * __real_to_special - build the special path from a real path
+ * __real_to_hcb - build the hidden control block (HCB) path from a real path
  */
-static int __real_to_special(char *dest, size_t destsize, const char *src)
+static int __real_to_hcb(char *dest, size_t destsize, const char *src)
 {
 	const char *directory_part = src;
 	const char *filename_part;
@@ -149,10 +149,10 @@ static int __real_to_special(char *dest, size_t destsize, const char *src)
 	return 0;
 }
 
-#define real_to_special(dest, src) \
-	__real_to_special((dest), sizeof(dest), (src))
+#define real_to_hcb(dest, src) \
+	__real_to_hcb((dest), sizeof(dest), (src))
 
-static int special_read(const char *path, struct special_info *info, int fd)
+static int hcb_read(const char *path, struct hcb *info, int fd)
 {
 	char *toul_ptr = NULL;
 	ssize_t ret;
@@ -190,12 +190,12 @@ static int special_read(const char *path, struct special_info *info, int fd)
 	return 0;
 
  busted:
-	special_file_got_busted(path);
+	hcb_got_busted(path);
 	unlinkat(root_fd, at(path), 0);
 	return -EINVAL;
 }
 
-static int special_write(const char *path, struct special_info *info, int fd)
+static int hcb_write(const char *path, struct hcb *info, int fd)
 {
 	size_t z;
 	int ret;
@@ -214,14 +214,14 @@ static int special_write(const char *path, struct special_info *info, int fd)
 	if (ret < 0)
 		return -errno;
 	if (ret != z) {
-		special_file_got_busted(path);
+		hcb_got_busted(path);
 		unlinkat(root_fd, at(path), 0);
 		return -EIO;
 	}
 	return 0;
 }
 
-static int special_lookup(const char *path, struct special_info *info)
+static int hcb_lookup(const char *path, struct hcb *info)
 {
 	int fd, ret;
 
@@ -230,61 +230,61 @@ static int special_lookup(const char *path, struct special_info *info)
 		return -errno;
 	if (lock_read(fd) < 0)
 		return -errno;
-	ret = special_read(path, info, fd);
+	ret = hcb_read(path, info, fd);
 	close(fd);
 	return ret;
 }
 
 /*
- * wd_special_lookup -
+ * wd_hcb_lookup -
  * @dir:	working directory
  * @name:	file
  * @info:	
  *
  * Combines the working directory @dir with @name (to form an absolute path)
- * then calls special_lookup().
+ * then calls hcb_lookup().
  */
-static inline int wd_special_lookup(const char *dir, const char *name,
-    struct special_info *info)
+static inline int wd_hcb_lookup(const char *dir, const char *name,
+    struct hcb *info)
 {
 	char path[PATH_MAX];
 	int ret;
 	ret = snprintf(path, sizeof(path), "%s%s", dir, name);
 	if (ret >= sizeof(path))
 		return -ENAMETOOLONG;
-	return special_lookup(path, info);
+	return hcb_lookup(path, info);
 }
 
 /*
- * wd_real_special_lookup -
+ * wd_real_hcb_lookup -
  * @dir:	working directory
  * @name:	file
  * @info:	
  *
  * Combines the working directory @dir with @name (to form an absolute path),
- * transforms it into the special filename, then calls special_lookup().
+ * transforms it into the HCB filename, then calls hcb_lookup().
  */
-static inline int wd_real_special_lookup(const char *dir, const char *name,
-    struct special_info *info)
+static inline int wd_real_hcb_lookup(const char *dir, const char *name,
+    struct hcb *info)
 {
 	char path[PATH_MAX], spec_path[PATH_MAX];
 	int ret;
 	ret = snprintf(path, sizeof(path), "%s%s", dir, name);
 	if (ret >= sizeof(path))
 		return -ENAMETOOLONG;
-	if ((ret = real_to_special(spec_path, path)) < 0)
+	if ((ret = real_to_hcb(spec_path, path)) < 0)
 		return ret;
-	return special_lookup(spec_path, info);
+	return hcb_lookup(spec_path, info);
 }
 
-static int special_init(const char *path, mode_t mode, uid_t uid,
+static int hcb_init(const char *path, mode_t mode, uid_t uid,
     gid_t gid, dev_t rdev, const char *target, unsigned int flags)
 {
-	struct special_info info;
+	struct hcb info;
 	char spec_path[PATH_MAX];
 	int fd, ret;
 
-	if ((ret = real_to_special(spec_path, path)) < 0)
+	if ((ret = real_to_hcb(spec_path, path)) < 0)
 		return ret;
 
 	fd = openat(root_fd, at(spec_path), O_RDWR | O_CREAT | flags,
@@ -293,7 +293,7 @@ static int special_init(const char *path, mode_t mode, uid_t uid,
 		return -errno;
 	if (lock_write(fd) < 0)
 		return -errno;
-	ret = special_read(spec_path, &info, fd);
+	ret = hcb_read(spec_path, &info, fd);
 	if (ret == -ENOENT) {
 		const struct fuse_context *ctx = fuse_get_context();
 		info.mode   = mode; /* is always specified then */
@@ -320,13 +320,13 @@ static int special_init(const char *path, mode_t mode, uid_t uid,
 	}
 
 	/* write out */
-	ret = special_write(spec_path, &info, fd);
+	ret = hcb_write(spec_path, &info, fd);
  err:
 	close(fd);
 	return ret;
 }
 
-static unsigned int is_special(const char *path)
+static unsigned int is_hcb(const char *path)
 {
 	const char *file = strrchr(path, '/');
 	if (file++ == NULL)
@@ -334,7 +334,7 @@ static unsigned int is_special(const char *path)
 	return strncmp(file, ".vfatx.", 7) == 0;
 }
 
-static int generic_permission(struct special_info *info, unsigned int mask)
+static int generic_permission(struct hcb *info, unsigned int mask)
 {
 	const struct fuse_context *ctx = fuse_get_context();
 	mode_t mode = info->mode;
@@ -351,17 +351,17 @@ static int generic_permission(struct special_info *info, unsigned int mask)
 static int vfatx_access(const char *path, int mode)
 {
 	char spec_path[PATH_MAX];
-	struct special_info info;
+	struct hcb info;
 	int ret;
 
-	if (is_special(path))
+	if (is_hcb(path))
 		return -ENOENT;
-	if ((ret = real_to_special(spec_path, path)) < 0)
+	if ((ret = real_to_hcb(spec_path, path)) < 0)
 		return ret;
 
-	ret = special_lookup(spec_path, &info);
+	ret = hcb_lookup(spec_path, &info);
 	if (ret == -ENOENT) {
-		/* No special file, try real file */
+		/* No HCB, try real file */
 		XRET(faccessat(root_fd, at(path), mode, AT_SYMLINK_NOFOLLOW));
 	} else if (ret < 0) {
 		return ret;
@@ -372,16 +372,16 @@ static int vfatx_access(const char *path, int mode)
 
 static int vfatx_chmod(const char *path, mode_t mode)
 {
-	if (is_special(path))
+	if (is_hcb(path))
 		return -ENOENT;
-	return special_init(path, mode, -1, -1, -1, NULL, 0);
+	return hcb_init(path, mode, -1, -1, -1, NULL, 0);
 }
 
 static int vfatx_chown(const char *path, uid_t uid, gid_t gid)
 {
-	if (is_special(path))
+	if (is_hcb(path))
 		return -ENOENT;
-	return special_init(path, -1, uid, gid, -1, NULL, 0);
+	return hcb_init(path, -1, uid, gid, -1, NULL, 0);
 }
 
 static int vfatx_close(const char *path, struct fuse_file_info *filp)
@@ -401,7 +401,7 @@ static int vfatx_create(const char *path, mode_t mode,
 {
 	int fd;
 
-	if (is_special(path))
+	if (is_hcb(path))
 		return -EINVAL;
 	if (could_be_too_long(path))
 		return -ENAMETOOLONG;
@@ -422,11 +422,11 @@ static int vfatx_ftruncate(const char *path, off_t length,
 
 static int vfatx_getattr(const char *path, struct stat *sb)
 {
-	struct special_info info;
+	struct hcb info;
 	char spec_path[PATH_MAX];
 	int ret;
 
-	if (is_special(path))
+	if (is_hcb(path))
 		return -ENOENT;
 
 	if (fstatat(root_fd, at(path), sb, AT_SYMLINK_NOFOLLOW) == 0) {
@@ -439,15 +439,15 @@ static int vfatx_getattr(const char *path, struct stat *sb)
 			 */
 			sb->st_mode &= ~S_IXUGO;
 
-		if ((ret = real_to_special(spec_path, path)) < 0)
+		if ((ret = real_to_hcb(spec_path, path)) < 0)
 			return ret;
-		ret = special_lookup(spec_path, &info);
+		ret = hcb_lookup(spec_path, &info);
 		if (ret == -ENOENT || ret == -EACCES)
 			return 0;
 		if (ret < 0)
 			return ret;
 
-		/* Special file also exists, update attributes. */
+		/* HCB also exists, update attributes. */
 		sb->st_mode = info.mode;
 		sb->st_uid  = info.uid;
 		sb->st_gid  = info.gid;
@@ -455,10 +455,10 @@ static int vfatx_getattr(const char *path, struct stat *sb)
 		return 0;
 	}
 
-	/* No real file, just a special file. */
-	if ((ret = real_to_special(spec_path, path)) < 0)
+	/* No real file, just a HCB. */
+	if ((ret = real_to_hcb(spec_path, path)) < 0)
 		return ret;
-	ret = special_lookup(spec_path, &info);
+	ret = hcb_lookup(spec_path, &info);
 	if (ret < 0)
 		return ret;
 
@@ -480,7 +480,7 @@ static int vfatx_fgetattr(const char *path, struct stat *sb,
 {
 	/*
 	 * Need to use the normal getattr because we need to check for the
-	 * special files too, not just @filp->fh.
+	 * HCB too, not just @filp->fh.
 	 */
 	return vfatx_getattr(path, sb);
 }
@@ -504,7 +504,7 @@ static int vfatx_lock(const char *path, struct fuse_file_info *filp, int cmd,
 
 static int vfatx_mkdir(const char *path, mode_t mode)
 {
-	if (is_special(path))
+	if (is_hcb(path))
 		return -EINVAL;
 	if (could_be_too_long(path))
 		return -ENAMETOOLONG;
@@ -513,19 +513,19 @@ static int vfatx_mkdir(const char *path, mode_t mode)
 
 static int vfatx_mknod(const char *path, mode_t mode, dev_t rdev)
 {
-	if (is_special(path))
+	if (is_hcb(path))
 		return -EINVAL;
 	if (could_be_too_long(path))
 		return -ENAMETOOLONG;
 
-	return special_init(path, mode, -1, -1, rdev, NULL, O_EXCL);
+	return hcb_init(path, mode, -1, -1, rdev, NULL, O_EXCL);
 }
 
 static int vfatx_open(const char *path, struct fuse_file_info *filp)
 {
 	int fd;
 
-	if (is_special(path))
+	if (is_hcb(path))
 		return -ENOENT;
 	if (could_be_too_long(path))
 		return -ENAMETOOLONG;
@@ -547,14 +547,14 @@ static int vfatx_read(const char *path, char *buffer, size_t size,
 static int vfatx_readdir(const char *path, void *buffer,
     fuse_fill_dir_t filldir, off_t offset, struct fuse_file_info *filp)
 {
-	struct special_info info;
+	struct hcb info;
 	struct dirent *dentry;
 	struct stat sb;
 	char *d_name;
 	DIR *ptr;
 	int ret = 0;
 
-	if (is_special(path))
+	if (is_hcb(path))
 		return -ENOENT;
 	if (could_be_too_long(path))
 		return -ENAMETOOLONG;
@@ -570,11 +570,10 @@ static int vfatx_readdir(const char *path, void *buffer,
 		sb.st_ino = dentry->d_ino;
 		if (strncmp(dentry->d_name, ".vfatx.", 7) == 0) {
 			/*
-			 * If a special file is found, return its real name,
-			 * but return the attributes stored in the special
-			 * file.
+			 * If a HCB is found, return its real name, but return
+			 * the attributes stored in the HCB.
 			 */
-			ret = wd_special_lookup(path, dentry->d_name, &info);
+			ret = wd_hcb_lookup(path, dentry->d_name, &info);
 			if (ret < 0) {
 				closedir(ptr);
 				return ret;
@@ -585,13 +584,13 @@ static int vfatx_readdir(const char *path, void *buffer,
 			/*
 			 * Seen regular file.
 			 */
-			ret = wd_real_special_lookup(path,
+			ret = wd_real_hcb_lookup(path,
 			      dentry->d_name, &info);
 			if (ret == 0 && !S_ISDIR(sb.st_mode))
 				/*
-				 * Real file, which has got a special file -
-				 * skip this entry. (Will be reading it in the
-				 * other else case.
+				 * Real file, which has got a HCB - skip this
+				 * entry. (Will be reading it in the other
+				 * else case.)
 				 */
 				continue;
 			if (ret < 0 && ret != -ENOENT && ret != -EACCES)
@@ -616,15 +615,15 @@ static int vfatx_readdir(const char *path, void *buffer,
 
 static int vfatx_readlink(const char *path, char *dest, size_t size)
 {
-	struct special_info info;
+	struct hcb info;
 	char spec_path[PATH_MAX];
 	int ret;
 
-	if (is_special(path))
+	if (is_hcb(path))
 		return -ENOENT;
-	if ((ret = real_to_special(spec_path, path)) < 0)
+	if ((ret = real_to_hcb(spec_path, path)) < 0)
 		return ret;
-	ret = special_lookup(spec_path, &info);
+	ret = hcb_lookup(spec_path, &info);
 	if (ret < 0)
 		return ret;
 	if ((info.mode & S_IFMT) != S_IFLNK)
@@ -638,38 +637,38 @@ static int vfatx_readlink(const char *path, char *dest, size_t size)
 static int vfatx_rename(const char *oldpath, const char *newpath)
 {
 	char spec_oldpath[PATH_MAX], spec_newpath[PATH_MAX];
-	struct special_info info;
+	struct hcb info;
 	int ret, ret_1, ret_2;
 	struct stat sb;
 
-	if (is_special(oldpath))
+	if (is_hcb(oldpath))
 		return -ENOENT;
-	if (is_special(newpath))
+	if (is_hcb(newpath))
 		return -EINVAL;
 	if (could_be_too_long(oldpath) || could_be_too_long(newpath))
 		return -ENAMETOOLONG;
 
 	/* We do not check for a real file until fstatat(). */
-	if ((ret = real_to_special(spec_oldpath, oldpath)) < 0)
+	if ((ret = real_to_hcb(spec_oldpath, oldpath)) < 0)
 		return ret;
-	ret = special_lookup(spec_oldpath, &info);
+	ret = hcb_lookup(spec_oldpath, &info);
 	if (ret == -ENOENT)
 		/*
-		 * No special oldfile. Existence of real oldfile unknown,
+		 * No HCB. Existence of real oldfile unknown,
 		 * but does not matter here.
 		 */
 		XRET(renameat(root_fd, at(oldpath), root_fd, at(newpath)));
 	if (ret < 0)
 		return ret;
 
-	/* Special oldfile exists. */
-	if ((ret = real_to_special(spec_newpath, newpath)) < 0)
+	/* HCB exists. */
+	if ((ret = real_to_hcb(spec_newpath, newpath)) < 0)
 		return ret;
 	ret = fstatat(root_fd, at(oldpath), &sb, AT_SYMLINK_NOFOLLOW);
 	if (ret < 0) {
 		if (errno == ENOENT)
 			/*
-			 * Special oldfile, no real oldfile, also simple.
+			 * Old HCB exists, real oldfile not, also simple.
 			 */
 			XRET(renameat(root_fd, at(spec_oldpath),
 			              root_fd, at(spec_newpath)));
@@ -677,10 +676,7 @@ static int vfatx_rename(const char *oldpath, const char *newpath)
 			return -errno;
 	}
 
-	/*
-	 * Real oldfile _and_ a special oldfile. Needs special locking.
-	 * (No pun intended.)
-	 */
+	/* Real oldfile _and_ an old HCB. Needs special locking. */
 	pthread_mutex_lock(&vfatx_protect);
 	ret_1 = renameat(root_fd, at(oldpath), root_fd, at(newpath));
 	if (ret_1 < 0) {
@@ -692,10 +688,7 @@ static int vfatx_rename(const char *oldpath, const char *newpath)
 		/* !@#$%^& - error. Need to rename old file back. */
 		ret = -errno;
 		if (renameat(root_fd, at(newpath), root_fd, at(oldpath)) < 0)
-			/*
-			 * Even that failed. Keep new name, but kill
-			 * special file.
-			 */
+			/* Even that failed. Keep new name, but kill HCB. */
 			unlinkat(root_fd, at(spec_oldpath), 0);
 
 		pthread_mutex_unlock(&vfatx_protect);
@@ -711,9 +704,9 @@ static int vfatx_rmdir(const char *path)
 	char spec_path[PATH_MAX];
 	int ret;
 
-	if (is_special(path))
+	if (is_hcb(path))
 		return -ENOENT;
-	if ((ret = real_to_special(spec_path, path)) < 0)
+	if ((ret = real_to_hcb(spec_path, path)) < 0)
 		return ret;
 
 	if (unlinkat(root_fd, spec_path, 0) < 0 && errno != ENOENT)
@@ -731,21 +724,21 @@ static int vfatx_statfs(const char *path, struct statvfs *sb)
 
 static int vfatx_symlink(const char *oldpath, const char *newpath)
 {
-	if (is_special(newpath))
+	if (is_hcb(newpath))
 		return -EINVAL;
 	if (could_be_too_long(newpath))
 		return -ENAMETOOLONG;
-	return special_init(newpath, S_IFLNK | S_IRWXUGO, -1, -1, -1,
+	return hcb_init(newpath, S_IFLNK | S_IRWXUGO, -1, -1, -1,
 	       oldpath, O_EXCL);
 }
 
 static int vfatx_truncate(const char *path, off_t length)
 {
 	char spec_path[PATH_MAX];
-	struct special_info info;
+	struct hcb info;
 	int fd, ret;
 
-	if (is_special(path))
+	if (is_hcb(path))
 		return -ENOENT;
 
 	/*
@@ -754,13 +747,13 @@ static int vfatx_truncate(const char *path, off_t length)
 	fd = openat(root_fd, at(path), 0, O_WRONLY);
 	if (fd < 0 && errno == ENOENT) {
 		/* No real file */
-		if ((ret = real_to_special(spec_path, path)) < 0)
+		if ((ret = real_to_hcb(spec_path, path)) < 0)
 			return ret;
-		ret = special_lookup(spec_path, &info);
+		ret = hcb_lookup(spec_path, &info);
 		if (ret < 0)
 			return ret;
 		/*
-		 * A special file was found. But truncating special
+		 * A HCB was found. But truncating special
 		 * files (e.g. /dev/null) returns -EINVAL.
 		 */
 		return -EINVAL;
@@ -781,12 +774,12 @@ static int vfatx_unlink(const char *path)
 	char spec_path[PATH_MAX];
 	int ret;
 
-	if (is_special(path))
+	if (is_hcb(path))
 		return -ENOENT;
-	if ((ret = real_to_special(spec_path, path)) < 0)
+	if ((ret = real_to_hcb(spec_path, path)) < 0)
 		return ret;
 
-	/* Ignore if special file not found */
+	/* Ignore if HCB not found */
 	if (unlinkat(root_fd, at(spec_path), 0) < 0 && errno != ENOENT)
 		return -errno;
 	XRET(unlinkat(root_fd, at(path), 0));
@@ -798,7 +791,7 @@ static int vfatx_utimens(const char *path, const struct timespec *ts)
 	struct timeval tv;
 	int ret;
 
-	if (is_special(path))
+	if (is_hcb(path))
 		return -ENOENT;
 
 	tv.tv_sec  = ts->tv_sec;
@@ -806,8 +799,8 @@ static int vfatx_utimens(const char *path, const struct timespec *ts)
 
 	ret = futimesat(root_fd, at(real_path), &tv);
 	if (ret < 0 && errno == ENOENT) {
-		/* See if there is a special file */
-		if ((ret = real_to_special(spec_path, path)) < 0)
+		/* See if there is a HCB */
+		if ((ret = real_to_hcb(spec_path, path)) < 0)
 			return ret;
 		ret = futimesat(root_fd, at(spec_path), &tv);
 	}

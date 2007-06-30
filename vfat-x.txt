@@ -14,11 +14,15 @@ Does not support:
 	Hard links
 
 Terminology:
-	Virtual file: /mnt/foo.txt
-	Real file: /vfat/foo.txt
-	Special file: /vfat/.vfatx.foo.txt
+	Real file:                  /source/foo.txt
+	Hidden control block (HCB): /source/.vfatx.foo.txt
+	Virtual file:               /target/foo.txt
 
 Notes:
-	If no special file exists for a file or/directory, the default
-	permissions are 644 or 755, respectively. The owner and group of the
-	inode will be the owner/group of the real file.
+	If no HCB exists for a file or directory, the default permissions are
+	644 and 755, respectively. The owner and group of the inode will be the
+	owner/group of the real file.
+
+	Each non-regular, non-directory virtual file will have a zero-size real
+	file. (Simplifies handling, and makes it apprarent the object exists
+	when using other OS.)
