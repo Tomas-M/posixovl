@@ -8,6 +8,8 @@
  *	published by the Free Software Foundation; either version 2 of
  *	the License, or (at your option) any later version.
  */
+#define _ATFILE_SOURCE 1
+#define _GNU_SOURCE 1
 #define FUSE_USE_VERSION 26
 #include <sys/fsuid.h>
 #include <sys/stat.h>
@@ -46,13 +48,6 @@
 	(((minor) & 0xFFF00) << 12) | (((major) & 0xFFF) << 8))
 
 /* Filename transformations */
-#define virtual_to_real(dest, src) /* build path */ \
-	(snprintf((dest), sizeof(dest), "%s%s", root_dir, (src)) >= \
-	          sizeof(dest))
-#define real_to_special(dest, src) \
-	(__real_to_special((dest), sizeof(dest), (src)) >= sizeof(dest))
-#define virtual_to_special(dest, src) \
-	(__virtual_to_special((dest), sizeof(dest), (src)) >= sizeof(dest))
 
 /* Buggers */
 #define should_not_happen() \
@@ -71,6 +66,7 @@
 		(__ret >= 0) ? __ret : -errno; \
 	})
 
+/* Definitions */
 struct special_info {
 	char buf[PATH_MAX], tbuf[PATH_MAX];
 	char *s_mode, *s_uid, *s_gid, *s_rdev, *s_target;
@@ -83,6 +79,7 @@ struct special_info {
 
 /* Global */
 static const char *root_dir;
+static int root_fd;
 static pthread_mutex_t vfatx_protect = PTHREAD_MUTEX_INITIALIZER;
 
 static inline int lock_read(int fd)
@@ -107,6 +104,15 @@ static inline int lock_write(int fd)
 	return fcntl(fd, F_SETLK, &fl);
 }
 
+static __attribute__((pure)) const char *at(const char *in)
+{
+	if (*in != '/')
+		should_not_happen();
+	if (in[1] == '\0')
+		return ".";
+	return in + 1;
+}
+
 /*
  * __real_to_special - build the special path from a real path
  */
@@ -115,30 +121,36 @@ static int __real_to_special(char *dest, size_t destsize, const char *src)
 	const char *directory_part = src;
 	const char *filename_part;
 	struct stat sb;
+	int ret;
 
-	if (lstat(src, &sb) == 0 && S_ISDIR(sb.st_mode))
-		return snprintf(dest, destsize, "%s/.vfatx.", src);
+	/*
+	 * !S_ISDIR: @src is "/foo/bar"
+	 *           => @dest must be "/foo/.vfatx.bar"
+	 *  S_ISDIR: @src is "/foo/bar"
+	 *           => @dest must be "/foo/bar/.vfatx."
+	 */
+	ret = fstatat(root_fd, at(src), &sb, AT_SYMLINK_NOFOLLOW);
+	if (ret == 0 && S_ISDIR(sb.st_mode)) {
+		ret = snprintf(dest, destsize, "%s/.vfatx.", src);
+		if (ret > destsize)
+			return -ENAMETOOLONG;
+		return 0;
+	}
 
 	filename_part = strrchr(src, '/');
 	if (filename_part++ == NULL)
 		should_not_happen();
 
-	return snprintf(dest, destsize, "%.*s.vfatx.%s",
-	       filename_part - directory_part, directory_part,
-	       filename_part);
+	ret = snprintf(dest, destsize, "%.*s.vfatx.%s",
+	      filename_part - directory_part, directory_part,
+	      filename_part);
+	if (ret > destsize)
+		return -ENAMETOOLONG;
+	return 0;
 }
 
-/*
- * __virtual_to_special - build the special path from a virtual path
- */
-static inline int __virtual_to_special(char *dest, size_t destsize,
-    const char *src)
-{
-	char tmp[PATH_MAX];
-	if (virtual_to_real(tmp, src))
-		return -ENAMETOOLONG;
-	return __real_to_special(dest, destsize, tmp);
-}
+#define real_to_special(dest, src) \
+	__real_to_special((dest), sizeof(dest), (src))
 
 static int special_read(const char *path, struct special_info *info, int fd)
 {
@@ -179,7 +191,7 @@ static int special_read(const char *path, struct special_info *info, int fd)
 
  busted:
 	special_file_got_busted(path);
-	unlink(path);
+	unlinkat(root_fd, at(path), 0);
 	return -EINVAL;
 }
 
@@ -203,7 +215,7 @@ static int special_write(const char *path, struct special_info *info, int fd)
 		return -errno;
 	if (ret != z) {
 		special_file_got_busted(path);
-		unlink(path);
+		unlinkat(root_fd, at(path), 0);
 		return -EIO;
 	}
 	return 0;
@@ -213,7 +225,7 @@ static int special_lookup(const char *path, struct special_info *info)
 {
 	int fd, ret;
 
-	fd = open(path, O_RDONLY);
+	fd = openat(root_fd, at(path), O_RDONLY);
 	if (fd < 0)
 		return -errno;
 	if (lock_read(fd) < 0)
@@ -224,7 +236,7 @@ static int special_lookup(const char *path, struct special_info *info)
 }
 
 /*
- * special_lookup_wd -
+ * wd_special_lookup -
  * @dir:	working directory
  * @name:	file
  * @info:	
@@ -232,7 +244,7 @@ static int special_lookup(const char *path, struct special_info *info)
  * Combines the working directory @dir with @name (to form an absolute path)
  * then calls special_lookup().
  */
-static inline int special_lookup_wd(const char *dir, const char *name,
+static inline int wd_special_lookup(const char *dir, const char *name,
     struct special_info *info)
 {
 	char path[PATH_MAX];
@@ -244,7 +256,7 @@ static inline int special_lookup_wd(const char *dir, const char *name,
 }
 
 /*
- * special_lookup_wdc -
+ * wd_real_special_lookup -
  * @dir:	working directory
  * @name:	file
  * @info:	
@@ -252,7 +264,7 @@ static inline int special_lookup_wd(const char *dir, const char *name,
  * Combines the working directory @dir with @name (to form an absolute path),
  * transforms it into the special filename, then calls special_lookup().
  */
-static inline int special_lookup_wdc(const char *dir, const char *name,
+static inline int wd_real_special_lookup(const char *dir, const char *name,
     struct special_info *info)
 {
 	char path[PATH_MAX], spec_path[PATH_MAX];
@@ -260,8 +272,8 @@ static inline int special_lookup_wdc(const char *dir, const char *name,
 	ret = snprintf(path, sizeof(path), "%s%s", dir, name);
 	if (ret >= sizeof(path))
 		return -ENAMETOOLONG;
-	if (real_to_special(spec_path, path))
-		return -ENAMETOOLONG;
+	if ((ret = real_to_special(spec_path, path)) < 0)
+		return ret;
 	return special_lookup(spec_path, info);
 }
 
@@ -272,10 +284,11 @@ static int special_init(const char *path, mode_t mode, uid_t uid,
 	char spec_path[PATH_MAX];
 	int fd, ret;
 
-	if (real_to_special(spec_path, path))
-		return -ENAMETOOLONG;
+	if ((ret = real_to_special(spec_path, path)) < 0)
+		return ret;
 
-	fd = open(spec_path, O_RDWR | O_CREAT | flags, S_IRUGO | S_IWUSR);
+	fd = openat(root_fd, at(spec_path), O_RDWR | O_CREAT | flags,
+	     S_IRUGO | S_IWUSR);
 	if (fd < 0)
 		return -errno;
 	if (lock_write(fd) < 0)
@@ -337,22 +350,19 @@ static int generic_permission(struct special_info *info, unsigned int mask)
 
 static int vfatx_access(const char *path, int mode)
 {
-	char spec_path[PATH_MAX], real_path[PATH_MAX];
+	char spec_path[PATH_MAX];
 	struct special_info info;
 	int ret;
 
 	if (is_special(path))
 		return -ENOENT;
-	if (virtual_to_special(spec_path, path))
-		return -ENAMETOOLONG;
+	if ((ret = real_to_special(spec_path, path)) < 0)
+		return ret;
 
 	ret = special_lookup(spec_path, &info);
 	if (ret == -ENOENT) {
-		/* Only real file */
-		if (virtual_to_real(real_path, path))
-			return -ENAMETOOLONG;
-
-		XRET(access(real_path, mode));
+		/* No special file, try real file */
+		XRET(faccessat(root_fd, at(path), mode, AT_SYMLINK_NOFOLLOW));
 	} else if (ret < 0) {
 		return ret;
 	}
@@ -362,26 +372,16 @@ static int vfatx_access(const char *path, int mode)
 
 static int vfatx_chmod(const char *path, mode_t mode)
 {
-	char real_path[PATH_MAX];
-
 	if (is_special(path))
 		return -ENOENT;
-	if (virtual_to_real(real_path, path))
-		return -ENAMETOOLONG;
-
-	return special_init(real_path, mode, -1, -1, -1, NULL, 0);
+	return special_init(path, mode, -1, -1, -1, NULL, 0);
 }
 
 static int vfatx_chown(const char *path, uid_t uid, gid_t gid)
 {
-	char real_path[PATH_MAX];
-
 	if (is_special(path))
 		return -ENOENT;
-	if (virtual_to_real(real_path, path))
-		return -ENAMETOOLONG;
-
-	return special_init(real_path, -1, uid, gid, -1, NULL, 0);
+	return special_init(path, -1, uid, gid, -1, NULL, 0);
 }
 
 static int vfatx_close(const char *path, struct fuse_file_info *filp)
@@ -399,17 +399,14 @@ static inline unsigned int could_be_too_long(const char *path)
 static int vfatx_create(const char *path, mode_t mode,
     struct fuse_file_info *filp)
 {
-	char real_path[PATH_MAX];
 	int fd;
 
 	if (is_special(path))
 		return -EINVAL;
 	if (could_be_too_long(path))
 		return -ENAMETOOLONG;
-	if (virtual_to_real(real_path, path))
-		return -ENAMETOOLONG;
 
-	fd = open(real_path, filp->flags, mode);
+	fd = openat(root_fd, at(path), filp->flags, mode);
 	if (fd < 0)
 		return -errno;
 
@@ -426,20 +423,24 @@ static int vfatx_ftruncate(const char *path, off_t length,
 static int vfatx_getattr(const char *path, struct stat *sb)
 {
 	struct special_info info;
-	char spec_path[PATH_MAX], real_path[PATH_MAX];
+	char spec_path[PATH_MAX];
 	int ret;
 
 	if (is_special(path))
 		return -ENOENT;
-	if (virtual_to_real(real_path, path))
-		return -ENAMETOOLONG;
 
-	if (lstat(real_path, sb) == 0) {
+	if (fstatat(root_fd, at(path), sb, AT_SYMLINK_NOFOLLOW) == 0) {
 		/* Real file exists... */
+
 		if (!S_ISDIR(sb->st_mode))
+			/*
+			 * Files by default start without an +x bit in vfat-x.
+			 * (No pun intended.)
+			 */
 			sb->st_mode &= ~S_IXUGO;
-		if (virtual_to_special(spec_path, path))
-			return -ENAMETOOLONG;
+
+		if ((ret = real_to_special(spec_path, path)) < 0)
+			return ret;
 		ret = special_lookup(spec_path, &info);
 		if (ret == -ENOENT)
 			return 0;
@@ -455,13 +456,12 @@ static int vfatx_getattr(const char *path, struct stat *sb)
 	}
 
 	/* No real file, just a special file. */
-	if (virtual_to_special(spec_path, path))
-		return -ENAMETOOLONG;
+	if ((ret = real_to_special(spec_path, path)) < 0)
+		return ret;
 	ret = special_lookup(spec_path, &info);
 	if (ret < 0)
 		return ret;
 
-	/* real file missing, special file exists */
 	sb->st_mode    = info.mode;
 	sb->st_nlink   = 1;
 	sb->st_uid     = info.uid;
@@ -478,8 +478,22 @@ static int vfatx_getattr(const char *path, struct stat *sb)
 static int vfatx_fgetattr(const char *path, struct stat *sb,
     struct fuse_file_info *filp)
 {
-	/* Need to use the normal getattr because of the special inodes. */
+	/*
+	 * Need to use the normal getattr because we need to check for the
+	 * special files too, not just @filp->fh.
+	 */
 	return vfatx_getattr(path, sb);
+}
+
+static void *vfatx_init(struct fuse_conn_info *conn)
+{
+	/*
+	 * There is no fopendirat(), we need to use fchdir() and
+	 * opendir(relative_path) instead.
+	 */
+	if (fchdir(root_fd) < 0)
+		abort();
+	return NULL;
 }
 
 static int vfatx_lock(const char *path, struct fuse_file_info *filp, int cmd,
@@ -490,35 +504,25 @@ static int vfatx_lock(const char *path, struct fuse_file_info *filp, int cmd,
 
 static int vfatx_mkdir(const char *path, mode_t mode)
 {
-	char real_path[PATH_MAX];
-
 	if (is_special(path))
 		return -EINVAL;
 	if (could_be_too_long(path))
 		return -ENAMETOOLONG;
-	if (virtual_to_real(real_path, path))
-		return -ENAMETOOLONG;
-
-	XRET(mkdir(real_path, mode));
+	XRET(mkdirat(root_fd, at(path), mode));
 }
 
 static int vfatx_mknod(const char *path, mode_t mode, dev_t rdev)
 {
-	char real_path[PATH_MAX];
-
 	if (is_special(path))
 		return -EINVAL;
 	if (could_be_too_long(path))
 		return -ENAMETOOLONG;
-	if (virtual_to_real(real_path, path))
-		return -ENAMETOOLONG;
 
-	return special_init(real_path, mode, -1, -1, rdev, NULL, O_EXCL);
+	return special_init(path, mode, -1, -1, rdev, NULL, O_EXCL);
 }
 
 static int vfatx_open(const char *path, struct fuse_file_info *filp)
 {
-	char real_path[PATH_MAX];
 	int fd;
 
 	if (is_special(path))
@@ -526,9 +530,7 @@ static int vfatx_open(const char *path, struct fuse_file_info *filp)
 	if (could_be_too_long(path))
 		return -ENAMETOOLONG;
 	/* no need to handle symlinks -- fuse seems to do that for us */
-	if (virtual_to_real(real_path, path))
-		return -ENAMETOOLONG;
-	if ((fd = open(real_path, filp->flags)) < 0)
+	if ((fd = openat(root_fd, at(path), filp->flags)) < 0)
 		return -errno;
 
 	filp->fh = fd;
@@ -545,7 +547,6 @@ static int vfatx_read(const char *path, char *buffer, size_t size,
 static int vfatx_readdir(const char *path, void *buffer,
     fuse_fill_dir_t filldir, off_t offset, struct fuse_file_info *filp)
 {
-	char real_path[PATH_MAX];
 	struct special_info info;
 	struct dirent *dentry;
 	struct stat sb;
@@ -557,33 +558,35 @@ static int vfatx_readdir(const char *path, void *buffer,
 		return -ENOENT;
 	if (could_be_too_long(path))
 		return -ENAMETOOLONG;
-	if (virtual_to_real(real_path, path))
-		return -ENAMETOOLONG;
-	if ((ptr = opendir(real_path)) == NULL)
+	/*
+	 * Current working directory is root_fd (per vfatx_init()).
+	 * Let's hope opendir(relative_path) works.
+	 */
+	if ((ptr = opendir(at(path))) == NULL)
 		return -errno;
 
 	memset(&sb, 0, sizeof(sb));
 	while ((dentry = readdir(ptr)) != NULL) {
 		sb.st_ino = dentry->d_ino;
 		if (strncmp(dentry->d_name, ".vfatx.", 7) == 0) {
-			d_name = dentry->d_name + 7;
-			ret = special_lookup_wd(real_path,
-			      dentry->d_name, &info);
+			/*
+			 * If a special file is found, return its real name,
+			 * but return the attributes stored in the special
+			 * file.
+			 */
+			ret = wd_special_lookup(path, dentry->d_name, &info);
 			if (ret < 0) {
 				closedir(ptr);
 				return ret;
 			}
-			if (ret > 0) {
-				sb.st_mode = info.mode;
-				ret = 0;
-			}
+			sb.st_mode = info.mode;
+			d_name     = dentry->d_name + 7;
 		} else {
-			d_name = dentry->d_name;
-			sb.st_mode = ((unsigned long)dentry->d_type << 12);
-			if (!S_ISDIR(sb.st_mode))
-				sb.st_mode &= ~S_IXUGO;
-			ret = special_lookup_wdc(real_path,
-			      d_name, &info);
+			/*
+			 * Seen regular file.
+			 */
+			ret = wd_real_special_lookup(path,
+			      dentry->d_name, &info);
 			if (ret == 0 && !S_ISDIR(sb.st_mode))
 				/*
 				 * Real file, which has got a special file -
@@ -593,6 +596,15 @@ static int vfatx_readdir(const char *path, void *buffer,
 				continue;
 			if (ret < 0 && ret != -ENOENT)
 				return ret;
+
+			sb.st_mode = ((unsigned long)dentry->d_type << 12);
+			d_name     = dentry->d_name;
+
+			if (!S_ISDIR(sb.st_mode))
+				/*
+				 * As usual, non-directories start without +x
+				 */
+				sb.st_mode &= ~S_IXUGO;
 		}
 		if (filldir(buffer, d_name, &sb, 0) > 0)
 			break;
@@ -606,12 +618,12 @@ static int vfatx_readlink(const char *path, char *dest, size_t size)
 {
 	struct special_info info;
 	char spec_path[PATH_MAX];
-	ssize_t ret;
+	int ret;
 
 	if (is_special(path))
 		return -ENOENT;
-	if (virtual_to_special(spec_path, path))
-		return -ENAMETOOLONG;
+	if ((ret = real_to_special(spec_path, path)) < 0)
+		return ret;
 	ret = special_lookup(spec_path, &info);
 	if (ret < 0)
 		return ret;
@@ -625,7 +637,6 @@ static int vfatx_readlink(const char *path, char *dest, size_t size)
 
 static int vfatx_rename(const char *oldpath, const char *newpath)
 {
-	char real_oldpath[PATH_MAX], real_newpath[PATH_MAX];
 	char spec_oldpath[PATH_MAX], spec_newpath[PATH_MAX];
 	struct special_info info;
 	int ret, ret_1, ret_2;
@@ -637,47 +648,55 @@ static int vfatx_rename(const char *oldpath, const char *newpath)
 		return -EINVAL;
 	if (could_be_too_long(oldpath) || could_be_too_long(newpath))
 		return -ENAMETOOLONG;
-	if (virtual_to_real(real_oldpath, oldpath))
-		return -ENAMETOOLONG;
-	if (virtual_to_real(real_newpath, newpath))
-		return -ENAMETOOLONG;
-	if (virtual_to_special(spec_oldpath, oldpath))
-		return -ENAMETOOLONG;
+
+	/* We do not check for a real file until fstatat(). */
+	if ((ret = real_to_special(spec_oldpath, oldpath)) < 0)
+		return ret;
 	ret = special_lookup(spec_oldpath, &info);
 	if (ret == -ENOENT)
-		/* Real file, no special file, simple */
-		XRET(rename(real_oldpath, real_newpath));
+		/*
+		 * No special oldfile. Existence of real oldfile unknown,
+		 * but does not matter here.
+		 */
+		XRET(renameat(root_fd, at(oldpath), root_fd, at(newpath)));
 	if (ret < 0)
 		return ret;
 
-	if (virtual_to_special(spec_newpath, newpath))
-		return -ENAMETOOLONG;
-	ret = lstat(real_oldpath, &sb);
+	/* Special oldfile exists. */
+	if ((ret = real_to_special(spec_newpath, newpath)) < 0)
+		return ret;
+	ret = fstatat(root_fd, at(oldpath), &sb, AT_SYMLINK_NOFOLLOW);
 	if (ret < 0) {
 		if (errno == ENOENT)
-			/* No real file, but a special file, simple */
-			XRET(rename(spec_oldpath, spec_newpath));
+			/*
+			 * Special oldfile, no real oldfile, also simple.
+			 */
+			XRET(renameat(root_fd, at(spec_oldpath),
+			              root_fd, at(spec_newpath)));
 		else
 			return -errno;
 	}
 
-	/* Real file _and_ a special file. Needs special locking. */
+	/*
+	 * Real oldfile _and_ a special oldfile. Needs special locking.
+	 * (No pun intended.)
+	 */
 	pthread_mutex_lock(&vfatx_protect);
-	ret_1 = rename(real_oldpath, real_newpath);
+	ret_1 = renameat(root_fd, at(oldpath), root_fd, at(newpath));
 	if (ret_1 < 0) {
 		pthread_mutex_unlock(&vfatx_protect);
 		return -errno;
 	}
-	ret_2 = rename(spec_oldpath, spec_newpath);
+	ret_2 = renameat(root_fd, at(spec_oldpath), root_fd, at(spec_newpath));
 	if (ret_2 < 0) {
-		/* Fsck - error. Need to rename old file back. */
+		/* !@#$%^& - error. Need to rename old file back. */
 		ret = -errno;
-		if (rename(real_newpath, real_oldpath) < 0)
+		if (renameat(root_fd, at(newpath), root_fd, at(oldpath)) < 0)
 			/*
 			 * Even that failed. Keep new name, but kill
 			 * special file.
 			 */
-			unlink(spec_oldpath);
+			unlinkat(root_fd, at(spec_oldpath), 0);
 
 		pthread_mutex_unlock(&vfatx_protect);
 		return ret;
@@ -689,92 +708,86 @@ static int vfatx_rename(const char *oldpath, const char *newpath)
 
 static int vfatx_rmdir(const char *path)
 {
-	char real_path[PATH_MAX];
+	char spec_path[PATH_MAX];
+	int ret;
 
 	if (is_special(path))
 		return -ENOENT;
-	if (virtual_to_real(real_path, path))
-		return -ENAMETOOLONG;
+	if ((ret = real_to_special(spec_path, path)) < 0)
+		return ret;
 
-	// rename special nodes
-	XRET(unlink(real_path));
+	if (unlinkat(root_fd, spec_path, 0) < 0 && errno != ENOENT)
+		return -errno;
+	XRET(unlinkat(root_fd, at(path), AT_REMOVEDIR));
 }
 
 static int vfatx_statfs(const char *path, struct statvfs *sb)
 {
-	char real_path[PATH_MAX];
-
-	// allow statfs on special files
-	if (virtual_to_real(real_path, path))
-		return -ENAMETOOLONG;
-	if (statvfs(real_path, sb) < 0)
+	if (fstatvfs(root_fd, sb) < 0)
 		return -errno;
-
 	sb->f_fsid = 0;
 	return 0;
 }
 
 static int vfatx_symlink(const char *oldpath, const char *newpath)
 {
-	char real_newpath[PATH_MAX];
-
 	if (is_special(newpath))
 		return -EINVAL;
 	if (could_be_too_long(newpath))
 		return -ENAMETOOLONG;
-	if (virtual_to_real(real_newpath, newpath))
-		return -ENAMETOOLONG;
-
-	return special_init(real_newpath, S_IFLNK | S_IRWXUGO, -1, -1, -1,
+	return special_init(newpath, S_IFLNK | S_IRWXUGO, -1, -1, -1,
 	       oldpath, O_EXCL);
 }
 
 static int vfatx_truncate(const char *path, off_t length)
 {
-	char spec_path[PATH_MAX], real_path[PATH_MAX];
+	char spec_path[PATH_MAX];
 	struct special_info info;
-	int ret;
+	int fd, ret;
 
 	if (is_special(path))
 		return -ENOENT;
-	if (virtual_to_real(real_path, path))
-		return -ENAMETOOLONG;
 
-	ret = truncate(real_path, length);
-	if (ret < 0 && errno == ENOENT) {
-		/* no real file */
-		if (virtual_to_special(spec_path, path))
-			return -ENAMETOOLONG;
+	/*
+	 * There is no ftruncateat(), so need to use openat()+ftruncate() here.
+	 */
+	fd = openat(root_fd, at(path), 0, O_WRONLY);
+	if (fd < 0 && errno == ENOENT) {
+		/* No real file */
+		if ((ret = real_to_special(spec_path, path)) < 0)
+			return ret;
 		ret = special_lookup(spec_path, &info);
 		if (ret < 0)
 			return ret;
-		/* Let truncates for non-regular files go */
-		return 0;
-	} else if (ret < 0) {
-		return -errno;
+		/*
+		 * A special file was found. But truncating special
+		 * files (e.g. /dev/null) returns -EINVAL.
+		 */
+		return -EINVAL;
 	}
 
-	return 0;
+	ret = ftruncate(fd, length);
+	if (ret < 0)
+		ret = -errno;
+
+	close(fd);
+	return ret;
 }
 
 static int vfatx_unlink(const char *path)
 {
-	char real_path[PATH_MAX];
+	char spec_path[PATH_MAX];
 	int ret;
 
 	if (is_special(path))
 		return -ENOENT;
-	if (virtual_to_special(real_path, path))
-		return -ENAMETOOLONG;
+	if ((ret = real_to_special(spec_path, path)) < 0)
+		return ret;
 
-	ret = unlink(real_path);
-	if (ret < 0 && errno != ENOENT)
+	/* Ignore if special file not found */
+	if (unlinkat(root_fd, at(spec_path), 0) < 0 && errno != ENOENT)
 		return -errno;
-
-	if (virtual_to_real(real_path, path))
-		return -ENAMETOOLONG;
-
-	XRET(unlink(real_path));
+	XRET(unlinkat(root_fd, at(path), 0));
 }
 
 static int vfatx_utimens(const char *path, const struct timespec *ts)
@@ -785,17 +798,17 @@ static int vfatx_utimens(const char *path, const struct timespec *ts)
 
 	if (is_special(path))
 		return -ENOENT;
-	if (virtual_to_real(real_path, path))
-		return -ENAMETOOLONG;
 
 	tv.tv_sec  = ts->tv_sec;
 	tv.tv_usec = ts->tv_nsec / 1000;
 
-	ret = utimes(real_path, &tv);
-	if (ret < 0)
-		if (errno == ENOENT)
-			/* See if there is a special file */
-			ret = utimes(spec_path, &tv);
+	ret = futimesat(root_fd, at(real_path), &tv);
+	if (ret < 0 && errno == ENOENT) {
+		/* See if there is a special file */
+		if ((ret = real_to_special(spec_path, path)) < 0)
+			return ret;
+		ret = futimesat(root_fd, at(spec_path), &tv);
+	}
 
 	XRET(ret);
 }
@@ -815,6 +828,7 @@ static const struct fuse_operations vfatx_ops = {
 	.fgetattr   = vfatx_fgetattr,
 	.ftruncate  = vfatx_ftruncate,
 	.getattr    = vfatx_getattr,
+	.init       = vfatx_init,
 	.lock       = vfatx_lock,
 	.mkdir      = vfatx_mkdir,
 	.mknod      = vfatx_mknod,
@@ -835,11 +849,36 @@ static const struct fuse_operations vfatx_ops = {
 
 int main(int argc, char **argv)
 {
-	if (argc < 3) {
-		fprintf(stderr, "Usage: %s /vfat [fuseopts] /mnt\n", *argv);
+	char **aptr, **new_argv;
+	int new_argc = 0;
+
+	if (argc < 2) {
+		fprintf(stderr, "Usage: %s [/source_dir] /target_dir [fuseopts]\n", *argv);
 		return EXIT_FAILURE;
 	}
 	root_dir = argv[1];
 	umask(0);
-	return fuse_main(argc-1, argv+1, &vfatx_ops, NULL);
+	if ((root_fd = open(root_dir, O_DIRECTORY)) < 0) {
+		fprintf(stderr, "Could not open(\"%s\"): %s\n",
+		        root_dir, strerror(errno));
+		abort();
+	}
+
+	new_argv = malloc(sizeof(char *) * (argc + 4));
+	new_argv[new_argc++] = argv[0];
+	new_argv[new_argc++] = "-f";
+	new_argv[new_argc++] = "-ofsname=vfat-x";
+
+	if (argc >= 3 && *argv[2] != '-') {
+		aptr = &argv[2];
+	} else if (argc >= 2) {
+	        aptr = &argv[1];
+		new_argv[new_argc++] = "-ononempty";
+	}
+
+	while (*aptr != NULL)
+		new_argv[new_argc++] = *aptr++;
+	new_argv[new_argc] = NULL;
+
+	return fuse_main(new_argc, new_argv, &vfatx_ops, NULL);
 }
