@@ -145,8 +145,9 @@ static int special_read(const char *path, struct special_info *info, int fd)
 	char *toul_ptr = NULL;
 	ssize_t ret;
 
-	if ((ret = read(fd, info->buf, sizeof(info->buf))) < 0)
+	if ((ret = read(fd, info->buf, sizeof(info->buf) - 1)) < 0)
 		return -errno;
+	info->buf[ret] = '\0';
 	if (ret == 0)
 		return -ENOENT;
 	info->size   = ret;
