@@ -442,7 +442,7 @@ static int vfatx_getattr(const char *path, struct stat *sb)
 		if ((ret = real_to_special(spec_path, path)) < 0)
 			return ret;
 		ret = special_lookup(spec_path, &info);
-		if (ret == -ENOENT)
+		if (ret == -ENOENT || ret == -EACCES)
 			return 0;
 		if (ret < 0)
 			return ret;
@@ -594,7 +594,7 @@ static int vfatx_readdir(const char *path, void *buffer,
 				 * other else case.
 				 */
 				continue;
-			if (ret < 0 && ret != -ENOENT)
+			if (ret < 0 && ret != -ENOENT && ret != -EACCES)
 				return ret;
 
 			sb.st_mode = ((unsigned long)dentry->d_type << 12);
