@@ -327,12 +327,17 @@ static int hcb_init(const char *path, mode_t mode, uid_t uid,
 	return ret;
 }
 
-static unsigned int is_hcb(const char *path)
+static inline unsigned int is_hcb(const char *path)
 {
 	const char *file = strrchr(path, '/');
 	if (file++ == NULL)
 		should_not_happen();
 	return strncmp(file, HCB_PREFIX, HCB_PREFIX_LEN) == 0;
+}
+
+static inline unsigned int is_hcb_4readdir(const char *name)
+{
+	return strncmp(name, HCB_PREFIX, HCB_PREFIX_LEN) == 0;
 }
 
 static int generic_permission(struct hcb *info, unsigned int mask)
@@ -569,7 +574,7 @@ static int vfatx_readdir(const char *path, void *buffer,
 	memset(&sb, 0, sizeof(sb));
 	while ((dentry = readdir(ptr)) != NULL) {
 		sb.st_ino = dentry->d_ino;
-		if (strncmp(dentry->d_name, HCB_PREFIX, HCB_PREFIX_LEN) == 0) {
+		if (is_hcb_4readdir(dentry->d_name)) {
 			/*
 			 * If a HCB is found, return its real name, but return
 			 * the attributes stored in the HCB.
