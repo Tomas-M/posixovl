@@ -328,7 +328,7 @@ static int hcb_init(const char *path, mode_t mode, uid_t uid,
 	return ret;
 }
 
-static inline unsigned int is_hcb(const char *path)
+static __attribute__((pure)) inline unsigned int is_hcb(const char *path)
 {
 	const char *file = strrchr(path, '/');
 	if (file++ == NULL)
@@ -336,7 +336,8 @@ static inline unsigned int is_hcb(const char *path)
 	return strncmp(file, HCB_PREFIX, HCB_PREFIX_LEN) == 0;
 }
 
-static inline unsigned int is_hcb_4readdir(const char *name)
+static __attribute__((pure)) inline
+unsigned int is_hcb_4readdir(const char *name)
 {
 	return strncmp(name, HCB_PREFIX, HCB_PREFIX_LEN) == 0;
 }
@@ -425,7 +426,8 @@ static int vfatx_close(const char *path, struct fuse_file_info *filp)
 	XRET(close(filp->fh));
 }
 
-static inline unsigned int could_be_too_long(const char *path)
+static __attribute__((pure)) inline
+unsigned int could_be_too_long(const char *path)
 {
 	/* Longest possible case is S_ISDIR: /root/path/.vfatx. */
 	return strlen(root_dir) + strlen(path) +
