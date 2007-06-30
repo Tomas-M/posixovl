@@ -81,6 +81,7 @@ struct hcb {
 /* Global */
 static const char *root_dir;
 static int root_fd;
+static unsigned int perform_setfsxid;
 static pthread_mutex_t vfatx_protect = PTHREAD_MUTEX_INITIALIZER;
 
 static inline int lock_read(int fd)
@@ -354,6 +355,32 @@ static int generic_permission(struct hcb *info, unsigned int mask)
 	return ((mode & mask & (R_OK | W_OK | X_OK)) == mask) ? 0 : -EACCES;
 }
 
+static inline void setfsxid(void)
+{
+	const struct fuse_context *ctx;
+	if (!perform_setfsxid)
+		return;
+	ctx = fuse_get_context();
+	if (setfsuid(ctx->uid) < 0)
+		perror("setfsuid");
+	if (setfsgid(ctx->gid) < 0)
+		perror("setfsgid");
+	return;
+}
+
+static inline void setrexid(void)
+{
+	const struct fuse_context *ctx;
+	if (!perform_setfsxid)
+		return;
+	ctx = fuse_get_context();
+	if (setreuid(ctx->uid, -1) < 0)
+		perror("setreuid()");
+	if (setregid(ctx->gid, -1) < 0)
+		perror("setregid()");
+	return;
+}
+
 static int vfatx_access(const char *path, int mode)
 {
 	char spec_path[PATH_MAX];
@@ -362,6 +389,7 @@ static int vfatx_access(const char *path, int mode)
 
 	if (is_hcb(path))
 		return -ENOENT;
+	setrexid();
 	if ((ret = real_to_hcb(spec_path, path)) < 0)
 		return ret;
 
@@ -380,6 +408,7 @@ static int vfatx_chmod(const char *path, mode_t mode)
 {
 	if (is_hcb(path))
 		return -ENOENT;
+	setfsxid();
 	return hcb_init(path, mode, -1, -1, -1, NULL, 0);
 }
 
@@ -387,6 +416,7 @@ static int vfatx_chown(const char *path, uid_t uid, gid_t gid)
 {
 	if (is_hcb(path))
 		return -ENOENT;
+	setfsxid();
 	return hcb_init(path, -1, uid, gid, -1, NULL, 0);
 }
 
@@ -412,6 +442,7 @@ static int vfatx_create(const char *path, mode_t mode,
 	if (could_be_too_long(path))
 		return -ENAMETOOLONG;
 
+	setfsxid();
 	fd = openat(root_fd, at(path), filp->flags, mode);
 	if (fd < 0)
 		return -errno;
@@ -423,6 +454,7 @@ static int vfatx_create(const char *path, mode_t mode,
 static int vfatx_ftruncate(const char *path, off_t length,
     struct fuse_file_info *filp)
 {
+	setfsxid();
 	XRET(ftruncate(filp->fh, length));
 }
 
@@ -435,6 +467,7 @@ static int vfatx_getattr(const char *path, struct stat *sb)
 	if (is_hcb(path))
 		return -ENOENT;
 
+	setfsxid();
 	if (fstatat(root_fd, at(path), sb, AT_SYMLINK_NOFOLLOW) == 0) {
 		/* Real file exists... */
 
@@ -505,6 +538,7 @@ static void *vfatx_init(struct fuse_conn_info *conn)
 static int vfatx_lock(const char *path, struct fuse_file_info *filp, int cmd,
     struct flock *fl)
 {
+	setfsxid();
 	XRET(fcntl(filp->fh, cmd, fl));
 }
 
@@ -514,6 +548,7 @@ static int vfatx_mkdir(const char *path, mode_t mode)
 		return -EINVAL;
 	if (could_be_too_long(path))
 		return -ENAMETOOLONG;
+	setfsxid();
 	XRET(mkdirat(root_fd, at(path), mode));
 }
 
@@ -525,7 +560,7 @@ static int vfatx_mknod(const char *path, mode_t mode, dev_t rdev)
 		return -EINVAL;
 	if (could_be_too_long(path))
 		return -ENAMETOOLONG;
-
+	setfsxid();
 	/*
 	 * The HCB is created first - since that one does not show up in
 	 * readdir() and is not accessible either.
@@ -556,6 +591,8 @@ static int vfatx_open(const char *path, struct fuse_file_info *filp)
 		return -ENOENT;
 	if (could_be_too_long(path))
 		return -ENAMETOOLONG;
+
+	setfsxid();
 	/* no need to handle symlinks -- fuse seems to do that for us */
 	if ((fd = openat(root_fd, at(path), filp->flags)) < 0)
 		return -errno;
@@ -584,6 +621,7 @@ static int vfatx_readdir(const char *path, void *buffer,
 		return -ENOENT;
 	if (could_be_too_long(path))
 		return -ENAMETOOLONG;
+	setfsxid();
 	/*
 	 * Current working directory is root_fd (per vfatx_init()).
 	 * Let's hope opendir(relative_path) works.
@@ -628,6 +666,7 @@ static int vfatx_readlink(const char *path, char *dest, size_t size)
 		return -ENOENT;
 	if ((ret = real_to_hcb(spec_path, path)) < 0)
 		return ret;
+	setfsxid();
 	ret = hcb_lookup(spec_path, &info);
 	if (ret < 0)
 		return ret;
@@ -656,6 +695,7 @@ static int vfatx_rename(const char *oldpath, const char *newpath)
 	/* We do not check for a real file until fstatat(). */
 	if ((ret = real_to_hcb(spec_oldpath, oldpath)) < 0)
 		return ret;
+	setfsxid();
 	ret = hcb_lookup(spec_oldpath, &info);
 	if (ret == -ENOENT)
 		/*
@@ -713,7 +753,7 @@ static int vfatx_rmdir(const char *path)
 		return -ENOENT;
 	if ((ret = real_to_hcb(spec_path, path)) < 0)
 		return ret;
-
+	setfsxid();
 	if (unlinkat(root_fd, spec_path, 0) < 0 && errno != ENOENT)
 		return -errno;
 	XRET(unlinkat(root_fd, at(path), AT_REMOVEDIR));
@@ -721,6 +761,7 @@ static int vfatx_rmdir(const char *path)
 
 static int vfatx_statfs(const char *path, struct statvfs *sb)
 {
+	setfsxid();
 	if (fstatvfs(root_fd, sb) < 0)
 		return -errno;
 	sb->f_fsid = 0;
@@ -735,7 +776,7 @@ static int vfatx_symlink(const char *oldpath, const char *newpath)
 		return -EINVAL;
 	if (could_be_too_long(newpath))
 		return -ENAMETOOLONG;
-
+	setfsxid();
 	pthread_mutex_lock(&vfatx_protect);
 	ret = hcb_init(newpath, S_IFLNK | S_IRWXUGO, -1, -1, -1,
 	      oldpath, O_EXCL);
@@ -763,6 +804,7 @@ static int vfatx_truncate(const char *path, off_t length)
 	if (is_hcb(path))
 		return -ENOENT;
 
+	setfsxid();
 	/*
 	 * There is no ftruncateat(), so need to use openat()+ftruncate() here.
 	 */
@@ -801,6 +843,7 @@ static int vfatx_unlink(const char *path)
 	if ((ret = real_to_hcb(spec_path, path)) < 0)
 		return ret;
 
+	setfsxid();
 	/* Ignore if HCB not found */
 	if (unlinkat(root_fd, at(spec_path), 0) < 0 && errno != ENOENT)
 		return -errno;
@@ -818,6 +861,7 @@ static int vfatx_utimens(const char *path, const struct timespec *ts)
 	tv.tv_sec  = ts->tv_sec;
 	tv.tv_usec = ts->tv_nsec / 1000;
 
+	setfsxid();
 	/*
 	 * The time attributes are always applied to the plain file,
 	 * never the special file.
@@ -878,7 +922,7 @@ int main(int argc, char **argv)
 		abort();
 	}
 
-	new_argv = malloc(sizeof(char *) * (argc + 4));
+	new_argv = malloc(sizeof(char *) * (argc + 5));
 	new_argv[new_argc++] = argv[0];
 	new_argv[new_argc++] = "-f";
 	new_argv[new_argc++] = "-ofsname=vfat-x";
@@ -889,6 +933,10 @@ int main(int argc, char **argv)
 	        aptr = &argv[1];
 		new_argv[new_argc++] = "-ononempty";
 	}
+
+	perform_setfsxid = geteuid() == 0;
+	if (perform_setfsxid)
+		new_argv[new_argc++] = "-oallow_other";
 
 	while (*aptr != NULL)
 		new_argv[new_argc++] = *aptr++;
