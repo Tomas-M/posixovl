@@ -107,17 +107,6 @@ static inline int lock_write(int fd)
 	return fcntl(fd, F_SETLK, &fl);
 }
 
-static inline int lock_release(int fd)
-{
-	struct flock fl = {
-		.l_type   = F_UNLCK,
-		.l_whence = SEEK_SET,
-		.l_start  = 0,
-		.l_len    = 0,
-	};
-	return fcntl(fd, F_SETLK, &fl);
-}
-
 /*
  * __real_to_special - build the special path from a real path
  */
@@ -228,14 +217,7 @@ static int special_lookup(const char *path, struct special_info *info)
 		return -errno;
 	if (lock_read(fd) < 0)
 		return -errno;
-	if ((ret = special_read(path, info, fd)) < 0)
-		goto err;
-	if (lock_release(fd) < 0)
-		goto err;
-	return 0;
-
- err:
-	lock_release(fd);
+	ret = special_read(path, info, fd);
 	close(fd);
 	return ret;
 }
@@ -324,17 +306,8 @@ static int special_init(const char *path, mode_t mode, uid_t uid,
 	}
 
 	/* write out */
-	if ((ret = special_write(spec_path, &info, fd)) < 0)
-		goto err;
-	if (lock_release(fd) < 0) {
-		ret = -errno;
-		goto err;
-	}
-	close(fd);
-	return 0;
-
+	ret = special_write(spec_path, &info, fd);
  err:
-	lock_release(fd);
 	close(fd);
 	return ret;
 }
