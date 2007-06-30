@@ -127,7 +127,7 @@ static int __real_to_special(char *dest, size_t destsize, const char *src)
 	const char *filename_part;
 	struct stat sb;
 
-	if (stat(src, &sb) == 0 && S_ISDIR(sb.st_mode))
+	if (lstat(src, &sb) == 0 && S_ISDIR(sb.st_mode))
 		return snprintf(dest, destsize, "%s/.vfatx.", src);
 
 	filename_part = strrchr(src, '/');
@@ -460,7 +460,7 @@ static int vfatx_getattr(const char *path, struct stat *sb)
 	if (virtual_to_real(real_path, path))
 		return -ENAMETOOLONG;
 
-	if (stat(real_path, sb) == 0) {
+	if (lstat(real_path, sb) == 0) {
 		/* Real file exists... */
 		if (!S_ISDIR(sb->st_mode))
 			sb->st_mode &= ~S_IXUGO;
@@ -469,6 +469,8 @@ static int vfatx_getattr(const char *path, struct stat *sb)
 		ret = special_lookup(spec_path, &info);
 		if (ret == -ENOENT)
 			return 0;
+		if (ret < 0)
+			return ret;
 
 		/* Special file also exists, update attributes. */
 		sb->st_mode = info.mode;
@@ -678,7 +680,7 @@ static int vfatx_rename(const char *oldpath, const char *newpath)
 
 	if (virtual_to_special(spec_newpath, newpath))
 		return -ENAMETOOLONG;
-	ret = stat(real_oldpath, &sb);
+	ret = lstat(real_oldpath, &sb);
 	if (ret < 0) {
 		if (errno == ENOENT)
 			/* No real file, but a special file, simple */
