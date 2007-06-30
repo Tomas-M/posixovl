@@ -773,7 +773,7 @@ static int vfatx_unlink(const char *path)
 		return -ENAMETOOLONG;
 
 	ret = unlink(real_path);
-	if (ret < 0 && ret != -ENOENT)
+	if (ret < 0 && errno != ENOENT)
 		return -errno;
 
 	if (virtual_to_real(real_path, path))
