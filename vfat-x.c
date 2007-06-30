@@ -519,12 +519,33 @@ static int vfatx_mkdir(const char *path, mode_t mode)
 
 static int vfatx_mknod(const char *path, mode_t mode, dev_t rdev)
 {
+	int fd, ret;
+
 	if (is_hcb(path))
 		return -EINVAL;
 	if (could_be_too_long(path))
 		return -ENAMETOOLONG;
 
-	return hcb_init(path, mode, -1, -1, rdev, NULL, O_EXCL);
+	/*
+	 * The HCB is created first - since that one does not show up in
+	 * readdir() and is not accessible either.
+	 * Same goes for vfatx_symlink().
+	 */
+	pthread_mutex_lock(&vfatx_protect);
+	ret = hcb_init(path, mode, -1, -1, rdev, NULL, O_TRUNC | O_EXCL);
+	if (ret < 0) {
+		pthread_mutex_unlock(&vfatx_protect);
+		return ret;
+	}
+
+	fd = openat(root_fd, at(path), O_WRONLY | O_CREAT | O_EXCL, 0);
+	if (fd < 0) {
+		ret = -errno;
+		unlinkat(root_fd, at(path), 0);
+	}
+	pthread_mutex_unlock(&vfatx_protect);
+	close(fd);
+	return ret;
 }
 
 static int vfatx_open(const char *path, struct fuse_file_info *filp)
@@ -556,7 +577,6 @@ static int vfatx_readdir(const char *path, void *buffer,
 	struct hcb info;
 	struct dirent *dentry;
 	struct stat sb;
-	char *d_name;
 	DIR *ptr;
 	int ret = 0;
 
@@ -573,50 +593,29 @@ static int vfatx_readdir(const char *path, void *buffer,
 
 	memset(&sb, 0, sizeof(sb));
 	while ((dentry = readdir(ptr)) != NULL) {
-		sb.st_ino = dentry->d_ino;
-		if (is_hcb_4readdir(dentry->d_name)) {
-			/*
-			 * If a HCB is found, return its real name, but return
-			 * the attributes stored in the HCB.
-			 */
-			ret = wd_hcb_lookup(path, dentry->d_name, &info);
-			if (ret < 0) {
-				closedir(ptr);
-				return ret;
-			}
+		if (is_hcb_4readdir(dentry->d_name))
+			continue;
+
+		sb.st_ino  = dentry->d_ino;
+		sb.st_mode = (unsigned long)dentry->d_type << 12;
+
+		/* As usual, non-directories start without +x */
+		if (!S_ISDIR(sb.st_mode))
+			sb.st_mode &= ~S_IXUGO;
+
+		ret = wd_real_hcb_lookup(path, dentry->d_name, &info);
+		if (ret < 0 && ret != -ENOENT && ret != -EACCES)
+			break;
+		else if (ret == 0)
 			sb.st_mode = info.mode;
-			d_name     = dentry->d_name + 7;
-		} else {
-			/*
-			 * Seen regular file.
-			 */
-			ret = wd_real_hcb_lookup(path,
-			      dentry->d_name, &info);
-			if (ret == 0 && !S_ISDIR(sb.st_mode))
-				/*
-				 * Real file, which has got a HCB - skip this
-				 * entry. (Will be reading it in the other
-				 * else case.)
-				 */
-				continue;
-			if (ret < 0 && ret != -ENOENT && ret != -EACCES)
-				return ret;
 
-			sb.st_mode = ((unsigned long)dentry->d_type << 12);
-			d_name     = dentry->d_name;
-
-			if (!S_ISDIR(sb.st_mode))
-				/*
-				 * As usual, non-directories start without +x
-				 */
-				sb.st_mode &= ~S_IXUGO;
-		}
-		if (filldir(buffer, d_name, &sb, 0) > 0)
+		ret = 0;
+		if ((*filldir)(buffer, dentry->d_name, &sb, 0) > 0)
 			break;
 	}
 
 	closedir(ptr);
-	return 0;
+	return ret;
 }
 
 static int vfatx_readlink(const char *path, char *dest, size_t size)
@@ -730,12 +729,29 @@ static int vfatx_statfs(const char *path, struct statvfs *sb)
 
 static int vfatx_symlink(const char *oldpath, const char *newpath)
 {
+	int fd, ret;
+
 	if (is_hcb(newpath))
 		return -EINVAL;
 	if (could_be_too_long(newpath))
 		return -ENAMETOOLONG;
-	return hcb_init(newpath, S_IFLNK | S_IRWXUGO, -1, -1, -1,
-	       oldpath, O_EXCL);
+
+	pthread_mutex_lock(&vfatx_protect);
+	ret = hcb_init(newpath, S_IFLNK | S_IRWXUGO, -1, -1, -1,
+	      oldpath, O_EXCL);
+	if (ret < 0) {
+		pthread_mutex_unlock(&vfatx_protect);
+		return ret;
+	}
+
+	fd = openat(root_fd, at(newpath), O_WRONLY | O_CREAT | O_EXCL, 0);
+	if (fd < 0) {
+		ret = -errno;
+		unlinkat(root_fd, at(newpath), 0);
+	}
+	pthread_mutex_unlock(&vfatx_protect);
+	close(fd);
+	return ret;
 }
 
 static int vfatx_truncate(const char *path, off_t length)
@@ -751,22 +767,22 @@ static int vfatx_truncate(const char *path, off_t length)
 	 * There is no ftruncateat(), so need to use openat()+ftruncate() here.
 	 */
 	fd = openat(root_fd, at(path), 0, O_WRONLY);
-	if (fd < 0 && errno == ENOENT) {
-		/* No real file */
-		if ((ret = real_to_hcb(spec_path, path)) < 0)
-			return ret;
-		ret = hcb_lookup(spec_path, &info);
-		if (ret < 0)
-			return ret;
+	if (fd < 0)
+		return -errno;
+	
+	if ((ret = real_to_hcb(spec_path, path)) < 0)
+		return ret;
+	ret = hcb_lookup(spec_path, &info);
+	if (ret < 0 && ret != -ENOENT)
+		return ret;
+	else if (ret == 0 && !S_ISREG(info.mode) && !S_ISDIR(info.mode))
 		/*
 		 * A HCB was found. But truncating special
-		 * files (e.g. /dev/null) returns -EINVAL.
+		 * files (e.g. /dev/zero) is invalid.
 		 */
 		return -EINVAL;
-	} else if (fd < 0) {
-		return -errno;
-	}
 
+	/* Will return -EISDIR for us if it is a directory. */
 	ret = ftruncate(fd, length);
 	if (ret < 0)
 		ret = -errno;
@@ -793,7 +809,6 @@ static int vfatx_unlink(const char *path)
 
 static int vfatx_utimens(const char *path, const struct timespec *ts)
 {
-	char spec_path[PATH_MAX], real_path[PATH_MAX];
 	struct timeval tv;
 	int ret;
 
@@ -803,14 +818,12 @@ static int vfatx_utimens(const char *path, const struct timespec *ts)
 	tv.tv_sec  = ts->tv_sec;
 	tv.tv_usec = ts->tv_nsec / 1000;
 
-	ret = futimesat(root_fd, at(real_path), &tv);
-	if (ret < 0 && errno == ENOENT) {
-		/* See if there is a HCB */
-		if ((ret = real_to_hcb(spec_path, path)) < 0)
-			return ret;
-		ret = futimesat(root_fd, at(spec_path), &tv);
-	}
-
+	/*
+	 * The time attributes are always applied to the plain file,
+	 * never the special file.
+	 * (Until a filesystem that cannot store times comes along.)
+	 */
+	ret = futimesat(root_fd, at(path), &tv);
 	XRET(ret);
 }
 
