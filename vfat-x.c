@@ -415,6 +415,13 @@ static int vfatx_close(const char *path, struct fuse_file_info *filp)
 	XRET(close(filp->fh));
 }
 
+static inline unsigned int could_be_too_long(const char *path)
+{
+	/* Longest possible case is S_ISDIR: /root/path/.vfatx. */
+	return strlen(root_dir) + strlen(path) +
+	       sizeof("/.vfatx.") - 1 >= PATH_MAX;
+}
+
 static int vfatx_create(const char *path, mode_t mode,
     struct fuse_file_info *filp)
 {
@@ -423,6 +430,8 @@ static int vfatx_create(const char *path, mode_t mode,
 
 	if (is_special(path))
 		return -EINVAL;
+	if (could_be_too_long(path))
+		return -ENAMETOOLONG;
 	if (virtual_to_real(real_path, path))
 		return -ENAMETOOLONG;
 
@@ -509,6 +518,8 @@ static int vfatx_mkdir(const char *path, mode_t mode)
 
 	if (is_special(path))
 		return -EINVAL;
+	if (could_be_too_long(path))
+		return -ENAMETOOLONG;
 	if (virtual_to_real(real_path, path))
 		return -ENAMETOOLONG;
 
@@ -521,6 +532,8 @@ static int vfatx_mknod(const char *path, mode_t mode, dev_t rdev)
 
 	if (is_special(path))
 		return -EINVAL;
+	if (could_be_too_long(path))
+		return -ENAMETOOLONG;
 	if (virtual_to_real(real_path, path))
 		return -ENAMETOOLONG;
 
@@ -534,6 +547,8 @@ static int vfatx_open(const char *path, struct fuse_file_info *filp)
 
 	if (is_special(path))
 		return -ENOENT;
+	if (could_be_too_long(path))
+		return -ENAMETOOLONG;
 	/* no need to handle symlinks -- fuse seems to do that for us */
 	if (virtual_to_real(real_path, path))
 		return -ENAMETOOLONG;
@@ -564,6 +579,8 @@ static int vfatx_readdir(const char *path, void *buffer,
 
 	if (is_special(path))
 		return -ENOENT;
+	if (could_be_too_long(path))
+		return -ENAMETOOLONG;
 	if (virtual_to_real(real_path, path))
 		return -ENAMETOOLONG;
 	if ((ptr = opendir(real_path)) == NULL)
@@ -644,6 +661,8 @@ static int vfatx_rename(const char *oldpath, const char *newpath)
 		return -ENOENT;
 	if (is_special(newpath))
 		return -EINVAL;
+	if (could_be_too_long(oldpath) || could_be_too_long(newpath))
+		return -ENAMETOOLONG;
 	if (virtual_to_real(real_oldpath, oldpath))
 		return -ENAMETOOLONG;
 	if (virtual_to_real(real_newpath, newpath))
@@ -727,6 +746,8 @@ static int vfatx_symlink(const char *oldpath, const char *newpath)
 
 	if (is_special(newpath))
 		return -EINVAL;
+	if (could_be_too_long(newpath))
+		return -ENAMETOOLONG;
 	if (virtual_to_real(real_newpath, newpath))
 		return -ENAMETOOLONG;
 
