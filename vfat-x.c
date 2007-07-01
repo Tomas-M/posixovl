@@ -478,10 +478,12 @@ static int vfatx_getattr(const char *path, struct stat *sb)
 	if (fstatat(root_fd, at(path), sb, AT_SYMLINK_NOFOLLOW) == 0) {
 		/* Real file exists... */
 
-		if (!S_ISDIR(sb->st_mode))
+		if (!S_ISDIR(sb->st_mode) && !S_ISLNK(sb->st_mode))
 			/*
 			 * Files by default start without an +x bit in vfat-x.
 			 * (No pun intended.)
+			 * Symlinks (if supported by the underlying fs)
+			 * are left as-is.
 			 */
 			sb->st_mode &= ~S_IXUGO;
 
@@ -555,6 +557,7 @@ static int vfatx_mkdir(const char *path, mode_t mode)
 		return -EPERM;
 	if (could_be_too_long(path))
 		return -ENAMETOOLONG;
+
 	setfsxid();
 	XRET(mkdirat(root_fd, at(path), mode));
 }
@@ -565,9 +568,16 @@ static int vfatx_mknod(const char *path, mode_t mode, dev_t rdev)
 
 	if (is_hcb(path))
 		return -EPERM;
+
+	setfsxid();
+	ret = mknodat(root_fd, at(path), mode, rdev);
+	if (ret < 0 && errno != EPERM)
+		return ret;
+	else if (ret >= 0)
+		return 0;
+
 	if (could_be_too_long(path))
 		return -ENAMETOOLONG;
-	setfsxid();
 	/*
 	 * The HCB is created first - since that one does not show up in
 	 * readdir() and is not accessible either.
@@ -600,7 +610,10 @@ static int vfatx_open(const char *path, struct fuse_file_info *filp)
 		return -ENAMETOOLONG;
 
 	setfsxid();
-	/* no need to handle symlinks -- fuse seems to do that for us */
+	/*
+	 * no need to handle non-regular files -- kernel (S_ISBLK, S_IFCHR,
+	 * S_IFIFO, S_IFSOCK) and FUSE (S_IFLNK) do that for us.
+	 */
 	if ((fd = openat(root_fd, at(path), filp->flags)) < 0)
 		return -errno;
 
@@ -671,9 +684,16 @@ static int vfatx_readlink(const char *path, char *dest, size_t size)
 
 	if (is_hcb(path))
 		return -ENOENT;
+
+	setfsxid();
+	ret = readlinkat(root_fd, at(path), dest, size);
+	if (ret < 0 && errno != EINVAL)
+		return ret;
+	else if (ret >= 0)
+		return 0;
+
 	if ((ret = real_to_hcb(spec_path, path)) < 0)
 		return ret;
-	setfsxid();
 	ret = hcb_lookup(spec_path, &info);
 	if (ret < 0)
 		return ret;
@@ -781,9 +801,19 @@ static int vfatx_symlink(const char *oldpath, const char *newpath)
 
 	if (is_hcb(newpath))
 		return -EPERM;
+
+	setfsxid();
+	ret = symlinkat(oldpath, root_fd, at(newpath));
+	if (ret < 0 && errno != EPERM)
+		return -errno;
+	else if (ret >= 0)
+		return 0;
+
 	if (could_be_too_long(newpath))
 		return -ENAMETOOLONG;
-	setfsxid();
+
+	/* symlink() not supported on underlying filesystem */
+
 	pthread_mutex_lock(&vfatx_protect);
 	ret = hcb_init(newpath, S_IFLNK | S_IRWXUGO, -1, -1, -1,
 	      oldpath, O_EXCL);
