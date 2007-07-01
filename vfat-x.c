@@ -126,10 +126,9 @@ static int __real_to_hcb(char *dest, size_t destsize, const char *src)
 	int ret;
 
 	/*
-	 * !S_ISDIR: @src is "/foo/bar"
-	 *           => @dest must be "/foo/.vfatx.bar"
-	 *  S_ISDIR: @src is "/foo/bar"
-	 *           => @dest must be "/foo/bar/.vfatx."
+	 * For directories, the HCB must be stored within the directory,
+	 * not "alongside" it. This is because there is no possible parallel
+	 * entry (on the same filesystem) for the root directory.
 	 */
 	ret = fstatat(root_fd, at(src), &sb, AT_SYMLINK_NOFOLLOW);
 	if (ret == 0 && S_ISDIR(sb.st_mode)) {
@@ -352,7 +351,11 @@ static int generic_permission(struct hcb *info, unsigned int mask)
 	if (ctx->uid == info->uid)
 		mode >>= 6;
 	else if (ctx->gid == info->gid)
-		/* not right yet, should be in_group() */
+		/*
+		 * More precisely, we would have to check if info->gid is in
+		 * all the supplementary groups of the process ctx->pid. But
+		 * there seems to be no way to getgroups() a different process.
+		 */
 		mode >>= 3;
 
 	return ((mode & mask & (R_OK | W_OK | X_OK)) == mask) ? 0 : -EACCES;
