@@ -302,7 +302,6 @@ static int hcb_init(const char *path, mode_t mode, uid_t uid,
 		info.uid    = ctx->uid;
 		info.gid    = ctx->gid;
 		info.rdev   = 0;
-		*info.tbuf  = '\0';
 	} else if (ret < 0) {
 		goto err;
 	}
@@ -316,10 +315,13 @@ static int hcb_init(const char *path, mode_t mode, uid_t uid,
 		info.gid = gid;
 	if (rdev != -1)
 		info.rdev = rdev;
-	if (target != NULL) {
-		memset(info.tbuf, 0, sizeof(info.tbuf));
+
+	if (target != NULL)
 		strncpy(info.tbuf, target, sizeof(info.tbuf));
-	}
+	else
+		/* move symlink target out of the way */
+		strncpy(info.tbuf, info.s_target, sizeof(info.tbuf));
+	info.tbuf[sizeof(info.tbuf)-1] = '\0';
 
 	/* write out */
 	ret = hcb_write(spec_path, &info, fd);
