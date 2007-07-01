@@ -1,5 +1,5 @@
 
-AC_INIT(vfat-x, 1.0)
+AC_INIT(posixovl, 1.0)
 AC_CONFIG_HEADERS(config.h)
 AM_INIT_AUTOMAKE
 AC_PROG_CC
