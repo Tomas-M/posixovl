@@ -882,6 +882,26 @@ static int vfatx_write(const char *path, const char *buffer, size_t size,
 	XRET(write(filp->fh, buffer, size));
 }
 
+static unsigned int user_allow_other(void)
+{
+	unsigned int ret = 0;
+	char buf[64];
+	FILE *fp;
+
+	if ((fp = fopen("/etc/fuse.conf", "r")) == NULL)
+		return 0;
+	while (fgets(buf, sizeof(buf), fp) != NULL)
+		/* no fancy line ending checks or anything */
+		if (strncmp(buf, "user_allow_other",
+		    sizeof("user_allow_other") - 1) == 0) {
+			ret = 1;
+			break;
+		}
+
+	fclose(fp);
+	return ret;
+}
+
 static const struct fuse_operations vfatx_ops = {
 	.access     = vfatx_access,
 	.chmod      = vfatx_chmod,
@@ -939,7 +959,7 @@ int main(int argc, char **argv)
 	}
 
 	perform_setfsxid = geteuid() == 0;
-	if (perform_setfsxid)
+	if (perform_setfsxid || user_allow_other())
 		new_argv[new_argc++] = "-oallow_other";
 
 	while (*aptr != NULL)
