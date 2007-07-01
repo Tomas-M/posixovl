@@ -475,51 +475,32 @@ static int vfatx_getattr(const char *path, struct stat *sb)
 		return -ENOENT;
 
 	setfsxid();
-	if (fstatat(root_fd, at(path), sb, AT_SYMLINK_NOFOLLOW) == 0) {
-		/* Real file exists... */
+	ret = fstatat(root_fd, at(path), sb, AT_SYMLINK_NOFOLLOW);
+	if (ret < 0)
+		return -errno;
 
-		if (!S_ISDIR(sb->st_mode) && !S_ISLNK(sb->st_mode))
-			/*
-			 * Files by default start without an +x bit in vfat-x.
-			 * (No pun intended.)
-			 * Symlinks (if supported by the underlying fs)
-			 * are left as-is.
-			 */
-			sb->st_mode &= ~S_IXUGO;
+	if (!S_ISDIR(sb->st_mode) && !S_ISLNK(sb->st_mode))
+		/*
+		 * Files by default start without an +x bit in vfat-x.
+		 * (No pun intended.)
+		 * Symlinks (if supported by the underlying fs)
+		 * are left as-is.
+		 */
+		sb->st_mode &= ~S_IXUGO;
 
-		if ((ret = real_to_hcb(spec_path, path)) < 0)
-			return ret;
-		ret = hcb_lookup(spec_path, &info);
-		if (ret == -ENOENT || ret == -EACCES)
-			return 0;
-		if (ret < 0)
-			return ret;
-
-		/* HCB also exists, update attributes. */
-		sb->st_mode = info.mode;
-		sb->st_uid  = info.uid;
-		sb->st_gid  = info.gid;
-		sb->st_rdev = info.rdev;
-		return 0;
-	}
-
-	/* No real file, just a HCB. */
 	if ((ret = real_to_hcb(spec_path, path)) < 0)
 		return ret;
 	ret = hcb_lookup(spec_path, &info);
+	if (ret == -ENOENT || ret == -EACCES)
+		return 0;
 	if (ret < 0)
 		return ret;
 
-	sb->st_mode    = info.mode;
-	sb->st_nlink   = 1;
-	sb->st_uid     = info.uid;
-	sb->st_gid     = info.gid;
-	sb->st_rdev    = info.rdev;
-	sb->st_size    = info.size;
-	sb->st_blksize = 4096;
-	sb->st_atime   =
-	sb->st_ctime   =
-	sb->st_mtime   = time(NULL);
+	/* HCB also exists, update attributes. */
+	sb->st_mode = info.mode;
+	sb->st_uid  = info.uid;
+	sb->st_gid  = info.gid;
+	sb->st_rdev = info.rdev;
 	return 0;
 }
 
@@ -658,7 +639,7 @@ static int vfatx_readdir(const char *path, void *buffer,
 		sb.st_mode = (unsigned long)dentry->d_type << 12;
 
 		/* As usual, non-directories start without +x */
-		if (!S_ISDIR(sb.st_mode))
+		if (!S_ISDIR(sb.st_mode) && !S_ISLNK(sb.st_mode))
 			sb.st_mode &= ~S_IXUGO;
 
 		ret = wd_real_hcb_lookup(path, dentry->d_name, &info);
