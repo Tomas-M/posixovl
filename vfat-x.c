@@ -1,5 +1,5 @@
 /*
- *	vfat-x - VFAT with Linux extensions
+ *	posixovl - POSIX overlay filesystem
  *
  *	Copyright © Jan Engelhardt <jengelh@computergmbh.de>, 2007
  *
@@ -65,7 +65,7 @@
 	})
 
 /* Definitions */
-#define HCB_PREFIX     ".vfatx."
+#define HCB_PREFIX     ".pxovl."
 #define HCB_PREFIX_LEN (sizeof(HCB_PREFIX) - 1)
 
 struct hcb {
@@ -82,7 +82,7 @@ struct hcb {
 static const char *root_dir;
 static int root_fd;
 static unsigned int perform_setfsxid;
-static pthread_mutex_t vfatx_protect = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t posixovl_protect = PTHREAD_MUTEX_INITIALIZER;
 
 static inline int lock_read(int fd)
 {
@@ -387,7 +387,7 @@ static inline void setrexid(void)
 	return;
 }
 
-static int vfatx_access(const char *path, int mode)
+static int posixovl_access(const char *path, int mode)
 {
 	char spec_path[PATH_MAX];
 	struct hcb info;
@@ -410,7 +410,7 @@ static int vfatx_access(const char *path, int mode)
 	return generic_permission(&info, mode);
 }
 
-static int vfatx_chmod(const char *path, mode_t mode)
+static int posixovl_chmod(const char *path, mode_t mode)
 {
 	if (is_hcb(path))
 		return -ENOENT;
@@ -418,7 +418,7 @@ static int vfatx_chmod(const char *path, mode_t mode)
 	return hcb_init(path, mode, -1, -1, -1, NULL, 0);
 }
 
-static int vfatx_chown(const char *path, uid_t uid, gid_t gid)
+static int posixovl_chown(const char *path, uid_t uid, gid_t gid)
 {
 	if (is_hcb(path))
 		return -ENOENT;
@@ -426,7 +426,7 @@ static int vfatx_chown(const char *path, uid_t uid, gid_t gid)
 	return hcb_init(path, -1, uid, gid, -1, NULL, 0);
 }
 
-static int vfatx_close(const char *path, struct fuse_file_info *filp)
+static int posixovl_close(const char *path, struct fuse_file_info *filp)
 {
 	XRET(close(filp->fh));
 }
@@ -434,12 +434,12 @@ static int vfatx_close(const char *path, struct fuse_file_info *filp)
 static __attribute__((pure)) inline
 unsigned int could_be_too_long(const char *path)
 {
-	/* Longest possible case is S_ISDIR: /root/path/.vfatx. */
+	/* Longest possible case is S_ISDIR: /root/path/.pxovl. */
 	return strlen(root_dir) + strlen(path) +
 	       1 + HCB_PREFIX_LEN >= PATH_MAX;
 }
 
-static int vfatx_create(const char *path, mode_t mode,
+static int posixovl_create(const char *path, mode_t mode,
     struct fuse_file_info *filp)
 {
 	int fd;
@@ -458,14 +458,14 @@ static int vfatx_create(const char *path, mode_t mode,
 	return 0;
 }
 
-static int vfatx_ftruncate(const char *path, off_t length,
+static int posixovl_ftruncate(const char *path, off_t length,
     struct fuse_file_info *filp)
 {
 	setfsxid();
 	XRET(ftruncate(filp->fh, length));
 }
 
-static int vfatx_getattr(const char *path, struct stat *sb)
+static int posixovl_getattr(const char *path, struct stat *sb)
 {
 	struct hcb info;
 	char spec_path[PATH_MAX];
@@ -504,17 +504,17 @@ static int vfatx_getattr(const char *path, struct stat *sb)
 	return 0;
 }
 
-static int vfatx_fgetattr(const char *path, struct stat *sb,
+static int posixovl_fgetattr(const char *path, struct stat *sb,
     struct fuse_file_info *filp)
 {
 	/*
 	 * Need to use the normal getattr because we need to check for the
 	 * HCB too, not just @filp->fh.
 	 */
-	return vfatx_getattr(path, sb);
+	return posixovl_getattr(path, sb);
 }
 
-static void *vfatx_init(struct fuse_conn_info *conn)
+static void *posixovl_init(struct fuse_conn_info *conn)
 {
 	/*
 	 * There is no fopendirat(), we need to use fchdir() and
@@ -525,14 +525,14 @@ static void *vfatx_init(struct fuse_conn_info *conn)
 	return NULL;
 }
 
-static int vfatx_lock(const char *path, struct fuse_file_info *filp, int cmd,
-    struct flock *fl)
+static int posixovl_lock(const char *path, struct fuse_file_info *filp,
+    int cmd, struct flock *fl)
 {
 	setfsxid();
 	XRET(fcntl(filp->fh, cmd, fl));
 }
 
-static int vfatx_mkdir(const char *path, mode_t mode)
+static int posixovl_mkdir(const char *path, mode_t mode)
 {
 	if (is_hcb(path))
 		return -EPERM;
@@ -543,7 +543,7 @@ static int vfatx_mkdir(const char *path, mode_t mode)
 	XRET(mkdirat(root_fd, at(path), mode));
 }
 
-static int vfatx_mknod(const char *path, mode_t mode, dev_t rdev)
+static int posixovl_mknod(const char *path, mode_t mode, dev_t rdev)
 {
 	int fd, ret;
 
@@ -562,12 +562,12 @@ static int vfatx_mknod(const char *path, mode_t mode, dev_t rdev)
 	/*
 	 * The HCB is created first - since that one does not show up in
 	 * readdir() and is not accessible either.
-	 * Same goes for vfatx_symlink().
+	 * Same goes for posixovl_symlink().
 	 */
-	pthread_mutex_lock(&vfatx_protect);
+	pthread_mutex_lock(&posixovl_protect);
 	ret = hcb_init(path, mode, -1, -1, rdev, NULL, O_TRUNC | O_EXCL);
 	if (ret < 0) {
-		pthread_mutex_unlock(&vfatx_protect);
+		pthread_mutex_unlock(&posixovl_protect);
 		return ret;
 	}
 
@@ -576,12 +576,12 @@ static int vfatx_mknod(const char *path, mode_t mode, dev_t rdev)
 		ret = -errno;
 		unlinkat(root_fd, at(path), 0);
 	}
-	pthread_mutex_unlock(&vfatx_protect);
+	pthread_mutex_unlock(&posixovl_protect);
 	close(fd);
 	return ret;
 }
 
-static int vfatx_open(const char *path, struct fuse_file_info *filp)
+static int posixovl_open(const char *path, struct fuse_file_info *filp)
 {
 	int fd;
 
@@ -602,14 +602,14 @@ static int vfatx_open(const char *path, struct fuse_file_info *filp)
 	return 0;
 }
 
-static int vfatx_read(const char *path, char *buffer, size_t size,
+static int posixovl_read(const char *path, char *buffer, size_t size,
     off_t offset, struct fuse_file_info *filp)
 {
 	lseek(filp->fh, offset, SEEK_SET);
 	XRET(read(filp->fh, buffer, size));
 }
 
-static int vfatx_readdir(const char *path, void *buffer,
+static int posixovl_readdir(const char *path, void *buffer,
     fuse_fill_dir_t filldir, off_t offset, struct fuse_file_info *filp)
 {
 	struct hcb info;
@@ -624,7 +624,7 @@ static int vfatx_readdir(const char *path, void *buffer,
 		return -ENAMETOOLONG;
 	setfsxid();
 	/*
-	 * Current working directory is root_fd (per vfatx_init()).
+	 * Current working directory is root_fd (per posixovl_init()).
 	 * Let's hope opendir(relative_path) works.
 	 */
 	if ((ptr = opendir(at(path))) == NULL)
@@ -657,7 +657,7 @@ static int vfatx_readdir(const char *path, void *buffer,
 	return ret;
 }
 
-static int vfatx_readlink(const char *path, char *dest, size_t size)
+static int posixovl_readlink(const char *path, char *dest, size_t size)
 {
 	struct hcb info;
 	char spec_path[PATH_MAX];
@@ -686,7 +686,7 @@ static int vfatx_readlink(const char *path, char *dest, size_t size)
 	return 0;
 }
 
-static int vfatx_rename(const char *oldpath, const char *newpath)
+static int posixovl_rename(const char *oldpath, const char *newpath)
 {
 	char spec_oldpath[PATH_MAX], spec_newpath[PATH_MAX];
 	struct hcb info;
@@ -730,10 +730,10 @@ static int vfatx_rename(const char *oldpath, const char *newpath)
 	}
 
 	/* Real oldfile _and_ an old HCB. Needs special locking. */
-	pthread_mutex_lock(&vfatx_protect);
+	pthread_mutex_lock(&posixovl_protect);
 	ret_1 = renameat(root_fd, at(oldpath), root_fd, at(newpath));
 	if (ret_1 < 0) {
-		pthread_mutex_unlock(&vfatx_protect);
+		pthread_mutex_unlock(&posixovl_protect);
 		return -errno;
 	}
 	ret_2 = renameat(root_fd, at(spec_oldpath), root_fd, at(spec_newpath));
@@ -744,15 +744,15 @@ static int vfatx_rename(const char *oldpath, const char *newpath)
 			/* Even that failed. Keep new name, but kill HCB. */
 			unlinkat(root_fd, at(spec_oldpath), 0);
 
-		pthread_mutex_unlock(&vfatx_protect);
+		pthread_mutex_unlock(&posixovl_protect);
 		return ret;
 	}
 
-	pthread_mutex_unlock(&vfatx_protect);
+	pthread_mutex_unlock(&posixovl_protect);
 	return 0;
 }
 
-static int vfatx_rmdir(const char *path)
+static int posixovl_rmdir(const char *path)
 {
 	char spec_path[PATH_MAX];
 	int ret;
@@ -767,7 +767,7 @@ static int vfatx_rmdir(const char *path)
 	XRET(unlinkat(root_fd, at(path), AT_REMOVEDIR));
 }
 
-static int vfatx_statfs(const char *path, struct statvfs *sb)
+static int posixovl_statfs(const char *path, struct statvfs *sb)
 {
 	setfsxid();
 	if (fstatvfs(root_fd, sb) < 0)
@@ -776,7 +776,7 @@ static int vfatx_statfs(const char *path, struct statvfs *sb)
 	return 0;
 }
 
-static int vfatx_symlink(const char *oldpath, const char *newpath)
+static int posixovl_symlink(const char *oldpath, const char *newpath)
 {
 	int fd, ret;
 
@@ -795,11 +795,11 @@ static int vfatx_symlink(const char *oldpath, const char *newpath)
 
 	/* symlink() not supported on underlying filesystem */
 
-	pthread_mutex_lock(&vfatx_protect);
+	pthread_mutex_lock(&posixovl_protect);
 	ret = hcb_init(newpath, S_IFLNK | S_IRWXUGO, -1, -1, -1,
 	      oldpath, O_EXCL);
 	if (ret < 0) {
-		pthread_mutex_unlock(&vfatx_protect);
+		pthread_mutex_unlock(&posixovl_protect);
 		return ret;
 	}
 
@@ -808,12 +808,12 @@ static int vfatx_symlink(const char *oldpath, const char *newpath)
 		ret = -errno;
 		unlinkat(root_fd, at(newpath), 0);
 	}
-	pthread_mutex_unlock(&vfatx_protect);
+	pthread_mutex_unlock(&posixovl_protect);
 	close(fd);
 	return ret;
 }
 
-static int vfatx_truncate(const char *path, off_t length)
+static int posixovl_truncate(const char *path, off_t length)
 {
 	char spec_path[PATH_MAX];
 	struct hcb info;
@@ -851,7 +851,7 @@ static int vfatx_truncate(const char *path, off_t length)
 	return ret;
 }
 
-static int vfatx_unlink(const char *path)
+static int posixovl_unlink(const char *path)
 {
 	char spec_path[PATH_MAX];
 	int ret;
@@ -868,7 +868,7 @@ static int vfatx_unlink(const char *path)
 	XRET(unlinkat(root_fd, at(path), 0));
 }
 
-static int vfatx_utimens(const char *path, const struct timespec *ts)
+static int posixovl_utimens(const char *path, const struct timespec *ts)
 {
 	struct timeval tv;
 	int ret;
@@ -889,7 +889,7 @@ static int vfatx_utimens(const char *path, const struct timespec *ts)
 	XRET(ret);
 }
 
-static int vfatx_write(const char *path, const char *buffer, size_t size,
+static int posixovl_write(const char *path, const char *buffer, size_t size,
     off_t offset, struct fuse_file_info *filp)
 {
 	lseek(filp->fh, offset, SEEK_SET);
@@ -916,31 +916,31 @@ static unsigned int user_allow_other(void)
 	return ret;
 }
 
-static const struct fuse_operations vfatx_ops = {
-	.access     = vfatx_access,
-	.chmod      = vfatx_chmod,
-	.chown      = vfatx_chown,
-	.create     = vfatx_create,
-	.fgetattr   = vfatx_fgetattr,
-	.ftruncate  = vfatx_ftruncate,
-	.getattr    = vfatx_getattr,
-	.init       = vfatx_init,
-	.lock       = vfatx_lock,
-	.mkdir      = vfatx_mkdir,
-	.mknod      = vfatx_mknod,
-	.open       = vfatx_open,
-	.read       = vfatx_read,
-	.readdir    = vfatx_readdir,
-	.readlink   = vfatx_readlink,
-	.release    = vfatx_close,
-	.rename     = vfatx_rename,
-	.rmdir      = vfatx_rmdir,
-	.statfs     = vfatx_statfs,
-	.symlink    = vfatx_symlink,
-	.truncate   = vfatx_truncate,
-	.unlink     = vfatx_unlink,
-	.utimens    = vfatx_utimens,
-	.write      = vfatx_write,
+static const struct fuse_operations posixovl_ops = {
+	.access     = posixovl_access,
+	.chmod      = posixovl_chmod,
+	.chown      = posixovl_chown,
+	.create     = posixovl_create,
+	.fgetattr   = posixovl_fgetattr,
+	.ftruncate  = posixovl_ftruncate,
+	.getattr    = posixovl_getattr,
+	.init       = posixovl_init,
+	.lock       = posixovl_lock,
+	.mkdir      = posixovl_mkdir,
+	.mknod      = posixovl_mknod,
+	.open       = posixovl_open,
+	.read       = posixovl_read,
+	.readdir    = posixovl_readdir,
+	.readlink   = posixovl_readlink,
+	.release    = posixovl_close,
+	.rename     = posixovl_rename,
+	.rmdir      = posixovl_rmdir,
+	.statfs     = posixovl_statfs,
+	.symlink    = posixovl_symlink,
+	.truncate   = posixovl_truncate,
+	.unlink     = posixovl_unlink,
+	.utimens    = posixovl_utimens,
+	.write      = posixovl_write,
 };
 
 int main(int argc, char **argv)
@@ -963,7 +963,7 @@ int main(int argc, char **argv)
 	new_argv = malloc(sizeof(char *) * (argc + 5));
 	new_argv[new_argc++] = argv[0];
 	new_argv[new_argc++] = "-f";
-	new_argv[new_argc++] = "-ofsname=vfat-x";
+	new_argv[new_argc++] = "-ofsname=posix-overlay";
 
 	if (argc >= 3 && *argv[2] != '-') {
 		aptr = &argv[2];
@@ -980,5 +980,5 @@ int main(int argc, char **argv)
 		new_argv[new_argc++] = *aptr++;
 	new_argv[new_argc] = NULL;
 
-	return fuse_main(new_argc, new_argv, &vfatx_ops, NULL);
+	return fuse_main(new_argc, new_argv, &posixovl_ops, NULL);
 }
