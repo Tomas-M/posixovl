@@ -34,6 +34,8 @@
 #ifndef S_IRWXUGO
 #	define S_IRWXUGO (S_IRUGO | S_IWUGO | S_IXUGO)
 #endif
+#define S_IFSOFTLNK       (S_IFLNK | S_IRWXUGO)
+#define S_ISSOFTLNK(mode) ((mode) == S_IFSOFTLNK)
 
 #define static_cast(type, x) ((type)(x))
 
@@ -699,7 +701,7 @@ static int posixovl_readlink(const char *path, char *dest, size_t size)
 	ret = hcb_lookup(spec_path, &info);
 	if (ret < 0)
 		return ret;
-	if ((info.mode & S_IFMT) != S_IFLNK)
+	if (!S_ISLNK(info.mode))
 		return -EINVAL; /* not a symbolic link */
 
 	memset(dest, 0, size);
@@ -817,8 +819,7 @@ static int posixovl_symlink(const char *oldpath, const char *newpath)
 	/* symlink() not supported on underlying filesystem */
 
 	pthread_mutex_lock(&posixovl_protect);
-	ret = hcb_init(newpath, S_IFLNK | S_IRWXUGO, -1, -1, -1, -1,
-	      oldpath, O_EXCL);
+	ret = hcb_init(newpath, S_IFSOFTLNK, -1, -1, -1, -1, oldpath, O_EXCL);
 	if (ret < 0) {
 		pthread_mutex_unlock(&posixovl_protect);
 		return ret;
