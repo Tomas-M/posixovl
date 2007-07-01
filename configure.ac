@@ -4,10 +4,10 @@ AC_CONFIG_HEADERS(config.h)
 AM_INIT_AUTOMAKE
 AC_PROG_CC
 
-AC_CFLAGS="-D_LARGEFILE_SOURCE=1 -D_LARGE_FILES -D_FILE_OFFSET_BITS=64 \
-	-D_REENTRANT -Wall -Waggregate-return -Wmissing-declarations \
-	-Wmissing-prototypes -Wredundant-decls -Wshadow -Wstrict-prototypes \
-	-Winline -pipe"
+AC_CFLAGS="-D_FORTIFY_SOURCE=2 -D_LARGEFILE_SOURCE=1 -D_LARGE_FILES \
+	-D_FILE_OFFSET_BITS=64 -D_REENTRANT -Wall -Waggregate-return \
+	-Wmissing-declarations -Wmissing-prototypes -Wredundant-decls \
+	-Wshadow -Wstrict-prototypes -Winline -pipe"
 
 saved_CFLAGS="$CFLAGS"
 saved_CPPFLAGS="$CPPFLAGS"
