@@ -533,6 +533,19 @@ static void *posixovl_init(struct fuse_conn_info *conn)
 	return NULL;
 }
 
+static int posixovl_link(const char *oldpath, const char *newpath)
+{
+	if (is_hcb(oldpath))
+		return -ENOENT;
+	if (is_hcb(newpath))
+		return -EPERM;
+	/*
+	 * Kernel/FUSE already takes care of prohibiting hardlinking
+	 * directories. We never get to see these.
+	 */
+	XRET(linkat(root_fd, at(oldpath), root_fd, at(newpath), 0));
+}
+
 static int posixovl_lock(const char *path, struct fuse_file_info *filp,
     int cmd, struct flock *fl)
 {
@@ -933,6 +946,7 @@ static const struct fuse_operations posixovl_ops = {
 	.ftruncate  = posixovl_ftruncate,
 	.getattr    = posixovl_getattr,
 	.init       = posixovl_init,
+	.link       = posixovl_link,
 	.lock       = posixovl_lock,
 	.mkdir      = posixovl_mkdir,
 	.mknod      = posixovl_mknod,
