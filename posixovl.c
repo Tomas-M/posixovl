@@ -70,8 +70,9 @@
 
 struct hcb {
 	char buf[PATH_MAX], tbuf[PATH_MAX];
-	char *s_mode, *s_uid, *s_gid, *s_rdev, *s_target;
+	const char *s_mode, *s_nlink, *s_uid, *s_gid, *s_rdev, *s_target;
 	mode_t mode;
+	nlink_t nlink;
 	uid_t uid;
 	gid_t gid;
 	dev_t rdev;
@@ -165,7 +166,10 @@ static int hcb_read(const char *path, struct hcb *info, int fd)
 		return -ENOENT;
 	info->size   = ret;
 	info->s_mode = info->buf;
-	info->s_uid  = strchr(info->buf, ' ');
+	info->s_nlink = strchr(info->buf, ' ');
+	if (info->s_nlink++ == NULL)
+		goto busted;
+	info->s_uid  = strchr(info->s_nlink, ' ');
 	if (info->s_uid++ == NULL)
 		goto busted;
 	info->s_gid = strchr(info->s_uid, ' ');
@@ -179,6 +183,7 @@ static int hcb_read(const char *path, struct hcb *info, int fd)
 		goto busted;
 
 	info->mode = strtoul(info->s_mode, NULL, 8);
+	info->nlink = strtoul(info->s_nlink, NULL, 0);
 	info->uid  = strtoul(info->s_uid, NULL, 0);
 	info->gid  = strtoul(info->s_gid, NULL, 0);
 
@@ -203,8 +208,9 @@ static int hcb_write(const char *path, struct hcb *info, int fd)
 
 	lseek(fd, 0, SEEK_SET);
 	ftruncate(fd, 0);
-	ret = snprintf(info->buf, sizeof(info->buf), "%o %lu %lu %lu:%lu %s",
-	      info->mode, static_cast(unsigned long, info->uid),
+	ret = snprintf(info->buf, sizeof(info->buf), "%o %u %lu %lu %lu:%lu %s",
+	      (unsigned int)info->mode, (unsigned int)info->nlink,
+	      static_cast(unsigned long, info->uid),
 	      static_cast(unsigned long, info->gid), COMPAT_MAJOR(info->rdev),
 	      COMPAT_MINOR(info->rdev), info->tbuf);
 	if (ret >= sizeof(info->buf))
@@ -278,7 +284,7 @@ static inline int wd_real_hcb_lookup(const char *dir, const char *name,
 	return hcb_lookup(spec_path, info);
 }
 
-static int hcb_init(const char *path, mode_t mode, uid_t uid,
+static int hcb_init(const char *path, mode_t mode, nlink_t nlink, uid_t uid,
     gid_t gid, dev_t rdev, const char *target, unsigned int flags)
 {
 	struct hcb info;
@@ -298,6 +304,7 @@ static int hcb_init(const char *path, mode_t mode, uid_t uid,
 	if (ret == -ENOENT) {
 		const struct fuse_context *ctx = fuse_get_context();
 		info.mode   = mode; /* is always specified then */
+		info.nlink  = 0;
 		info.uid    = ctx->uid;
 		info.gid    = ctx->gid;
 		info.rdev   = 0;
@@ -308,6 +315,8 @@ static int hcb_init(const char *path, mode_t mode, uid_t uid,
 	/* update */
 	if (mode != -1)
 		info.mode = mode;
+	if (nlink != -1)
+		info.nlink = nlink;
 	if (uid != -1)
 		info.uid = uid;
 	if (gid != -1)
@@ -415,7 +424,7 @@ static int posixovl_chmod(const char *path, mode_t mode)
 	if (is_hcb(path))
 		return -ENOENT;
 	setfsxid();
-	return hcb_init(path, mode, -1, -1, -1, NULL, 0);
+	return hcb_init(path, mode, -1, -1, -1, -1, NULL, 0);
 }
 
 static int posixovl_chown(const char *path, uid_t uid, gid_t gid)
@@ -423,7 +432,7 @@ static int posixovl_chown(const char *path, uid_t uid, gid_t gid)
 	if (is_hcb(path))
 		return -ENOENT;
 	setfsxid();
-	return hcb_init(path, -1, uid, gid, -1, NULL, 0);
+	return hcb_init(path, -1, -1, uid, gid, -1, NULL, 0);
 }
 
 static int posixovl_close(const char *path, struct fuse_file_info *filp)
@@ -564,7 +573,7 @@ static int posixovl_mknod(const char *path, mode_t mode, dev_t rdev)
 	 * Same goes for posixovl_symlink().
 	 */
 	pthread_mutex_lock(&posixovl_protect);
-	ret = hcb_init(path, mode, -1, -1, rdev, NULL, O_TRUNC | O_EXCL);
+	ret = hcb_init(path, mode, -1, -1, -1, rdev, NULL, O_TRUNC | O_EXCL);
 	if (ret < 0) {
 		pthread_mutex_unlock(&posixovl_protect);
 		return ret;
@@ -795,7 +804,7 @@ static int posixovl_symlink(const char *oldpath, const char *newpath)
 	/* symlink() not supported on underlying filesystem */
 
 	pthread_mutex_lock(&posixovl_protect);
-	ret = hcb_init(newpath, S_IFLNK | S_IRWXUGO, -1, -1, -1,
+	ret = hcb_init(newpath, S_IFLNK | S_IRWXUGO, -1, -1, -1, -1,
 	      oldpath, O_EXCL);
 	if (ret < 0) {
 		pthread_mutex_unlock(&posixovl_protect);
