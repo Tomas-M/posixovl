@@ -440,7 +440,7 @@ static int vfatx_create(const char *path, mode_t mode,
 	int fd;
 
 	if (is_hcb(path))
-		return -EINVAL;
+		return -EPERM;
 	if (could_be_too_long(path))
 		return -ENAMETOOLONG;
 
@@ -547,7 +547,7 @@ static int vfatx_lock(const char *path, struct fuse_file_info *filp, int cmd,
 static int vfatx_mkdir(const char *path, mode_t mode)
 {
 	if (is_hcb(path))
-		return -EINVAL;
+		return -EPERM;
 	if (could_be_too_long(path))
 		return -ENAMETOOLONG;
 	setfsxid();
@@ -559,7 +559,7 @@ static int vfatx_mknod(const char *path, mode_t mode, dev_t rdev)
 	int fd, ret;
 
 	if (is_hcb(path))
-		return -EINVAL;
+		return -EPERM;
 	if (could_be_too_long(path))
 		return -ENAMETOOLONG;
 	setfsxid();
@@ -690,7 +690,7 @@ static int vfatx_rename(const char *oldpath, const char *newpath)
 	if (is_hcb(oldpath))
 		return -ENOENT;
 	if (is_hcb(newpath))
-		return -EINVAL;
+		return -EPERM;
 	if (could_be_too_long(oldpath) || could_be_too_long(newpath))
 		return -ENAMETOOLONG;
 
@@ -775,7 +775,7 @@ static int vfatx_symlink(const char *oldpath, const char *newpath)
 	int fd, ret;
 
 	if (is_hcb(newpath))
-		return -EINVAL;
+		return -EPERM;
 	if (could_be_too_long(newpath))
 		return -ENAMETOOLONG;
 	setfsxid();
