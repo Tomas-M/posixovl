@@ -1,6 +1,6 @@
 
 Usage:
-	mount.vfat-x /vfat [fuseopts] /mnt
+	mount.posixovl /vfat [fuseopts] /mnt
 
 Supports:
 	chmod
@@ -15,7 +15,7 @@ Does not support:
 
 Terminology:
 	Real file:                  /source/foo.txt
-	Hidden control block (HCB): /source/.vfatx.foo.txt
+	Hidden control block (HCB): /source/.pxovl.foo.txt
 	Virtual file:               /target/foo.txt
 
 Notes:

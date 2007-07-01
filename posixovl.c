@@ -481,8 +481,7 @@ static int posixovl_getattr(const char *path, struct stat *sb)
 
 	if (!S_ISDIR(sb->st_mode) && !S_ISLNK(sb->st_mode))
 		/*
-		 * Files by default start without an +x bit in vfat-x.
-		 * (No pun intended.)
+		 * Files by default start without an +x bit.
 		 * Symlinks (if supported by the underlying fs)
 		 * are left as-is.
 		 */
