@@ -849,7 +849,7 @@ static int posixovl_truncate(const char *path, off_t length)
 	/*
 	 * There is no ftruncateat(), so need to use openat()+ftruncate() here.
 	 */
-	fd = openat(root_fd, at(path), 0, O_WRONLY);
+	fd = openat(root_fd, at(path), O_WRONLY);
 	if (fd < 0)
 		return -errno;
 	
