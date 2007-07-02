@@ -294,7 +294,7 @@ static inline int hcb_lookup_4readdir(const char *dir, const char *name,
  * @gid:	owning group
  * @rdev:	device number for block and character devices
  * @target:	target for soft and hardlinks
- * @flags:	flags for openat(). May be 0 or O_EXCL.
+ * @flags:	flags for openat(). May be 0 or %O_EXCL.
  */
 static int hcb_init(const char *path, mode_t mode, nlink_t nlink, uid_t uid,
     gid_t gid, dev_t rdev, const char *target, unsigned int flags)
@@ -302,6 +302,9 @@ static int hcb_init(const char *path, mode_t mode, nlink_t nlink, uid_t uid,
 	struct hcb info;
 	char spec_path[PATH_MAX];
 	int fd, ret;
+
+	if (flags != 0 && flags != O_EXCL)
+		should_not_happen();
 
 	if ((ret = real_to_hcb(spec_path, path)) < 0)
 		return ret;
@@ -603,7 +606,7 @@ static int posixovl_mknod(const char *path, mode_t mode, dev_t rdev)
 	 * Same goes for posixovl_symlink().
 	 */
 	pthread_mutex_lock(&posixovl_protect);
-	ret = hcb_init(path, mode, -1, -1, -1, rdev, NULL, O_TRUNC | O_EXCL);
+	ret = hcb_init(path, mode, -1, -1, -1, rdev, NULL, O_EXCL);
 	if (ret < 0) {
 		pthread_mutex_unlock(&posixovl_protect);
 		return ret;
