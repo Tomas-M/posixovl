@@ -536,6 +536,8 @@ static int posixovl_getattr(const char *path, struct stat *sb)
 	sb->st_uid   = info.uid;
 	sb->st_gid   = info.gid;
 	sb->st_rdev  = info.rdev;
+	if (!S_ISREG(info.mode) && !S_ISDIR(info.mode))
+		sb->st_size = info.size;
 	return 0;
 }
 
