@@ -314,8 +314,8 @@ static int hcb_init(const char *spec_path, mode_t mode, nlink_t nlink,
 	ret = hcb_read(spec_path, &info, fd);
 	if (ret == -ENOENT) {
 		const struct fuse_context *ctx = fuse_get_context();
-		info.mode   = mode; /* is always specified then */
-		info.nlink  = 0;
+		info.mode   = mode;
+		info.nlink  = 1;
 		info.uid    = ctx->uid;
 		info.gid    = ctx->gid;
 		info.rdev   = 0;
@@ -353,8 +353,7 @@ static int hcb_init(const char *spec_path, mode_t mode, nlink_t nlink,
 	return ret;
 }
 
-static __attribute__((pure)) inline
-unsigned int is_hcb_name(const char *name)
+static __attribute__((pure)) inline unsigned int is_hcb_name(const char *name)
 {
 	return strncmp(name, HCB_PREFIX, HCB_PREFIX_LEN) == 0;
 }
@@ -531,6 +530,7 @@ static int posixovl_getattr(const char *path, struct stat *sb)
 
 	/* HCB also exists, update attributes. */
 	sb->st_mode = info.mode;
+	sb->st_nlink = info.nlink;
 	sb->st_uid  = info.uid;
 	sb->st_gid  = info.gid;
 	sb->st_rdev = info.rdev;
