@@ -1021,9 +1021,8 @@ int main(int argc, char **argv)
 		abort();
 	}
 
-	new_argv = malloc(sizeof(char *) * (argc + 5));
+	new_argv = malloc(sizeof(char *) * (argc + 4));
 	new_argv[new_argc++] = argv[0];
-	new_argv[new_argc++] = "-f";
 	new_argv[new_argc++] = "-ofsname=posix-overlay";
 
 	if (argc >= 3 && *argv[2] != '-') {
