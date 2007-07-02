@@ -109,6 +109,9 @@ static inline int lock_write(int fd)
 	return fcntl(fd, F_SETLK, &fl);
 }
 
+/*
+ * at - turn a virtual path into a relative (to root_fd) one
+ */
 static __attribute__((pure)) const char *at(const char *in)
 {
 	if (*in != '/')
@@ -153,9 +156,14 @@ static int __real_to_hcb(char *dest, size_t destsize, const char *src)
 	return 0;
 }
 
-#define real_to_hcb(dest, src) \
-	__real_to_hcb((dest), sizeof(dest), (src))
+#define real_to_hcb(dest, src) __real_to_hcb((dest), sizeof(dest), (src))
 
+/*
+ * hcb_read -
+ * @path:	path to HCB (used for debug and unlink)
+ * @info:	destination structure
+ * @fd:		fd to read from
+ */
 static int hcb_read(const char *path, struct hcb *info, int fd)
 {
 	const char *s_mode, *s_nlink, *s_uid, *s_gid, *s_rdev;
@@ -235,6 +243,12 @@ static int hcb_write(const char *path, struct hcb *info, int fd)
 	return 0;
 }
 
+/*
+ * hcb_lookup - read a HCB
+ * @path:	pathname to the HCB (e.g. /foo/bar/.pxovl.filename or
+ *		/foo/bar/.pxovn.ID)
+ * @info:	destination buffer
+ */
 static int hcb_lookup(const char *path, struct hcb *info)
 {
 	int fd, ret;
@@ -250,7 +264,7 @@ static int hcb_lookup(const char *path, struct hcb *info)
 }
 
 /*
- * wd_real_hcb_lookup -
+ * hcb_lookup_4readdir -
  * @dir:	working directory
  * @name:	file
  * @info:	
@@ -258,7 +272,7 @@ static int hcb_lookup(const char *path, struct hcb *info)
  * Combines the working directory @dir with @name (to form an absolute path),
  * transforms it into the HCB filename, then calls hcb_lookup().
  */
-static inline int wd_real_hcb_lookup(const char *dir, const char *name,
+static inline int hcb_lookup_4readdir(const char *dir, const char *name,
     struct hcb *info)
 {
 	char path[PATH_MAX], spec_path[PATH_MAX];
@@ -271,6 +285,17 @@ static inline int wd_real_hcb_lookup(const char *dir, const char *name,
 	return hcb_lookup(spec_path, info);
 }
 
+/*
+ * hcb_init - Create or update HCB
+ * @spec_path:	path to the HCB
+ * @mode:	file mode and permissions
+ * @nlink:	nlink count
+ * @uid:	owning user
+ * @gid:	owning group
+ * @rdev:	device number for block and character devices
+ * @target:	target for soft and hardlinks
+ * @flags:	flags for openat(). May be 0 or O_EXCL.
+ */
 static int hcb_init(const char *path, mode_t mode, nlink_t nlink, uid_t uid,
     gid_t gid, dev_t rdev, const char *target, unsigned int flags)
 {
@@ -329,18 +354,18 @@ static int hcb_init(const char *path, mode_t mode, nlink_t nlink, uid_t uid,
 	return ret;
 }
 
+static __attribute__((pure)) inline
+unsigned int is_hcb_name(const char *name)
+{
+	return strncmp(name, HCB_PREFIX, HCB_PREFIX_LEN) == 0;
+}
+
 static __attribute__((pure)) inline unsigned int is_hcb(const char *path)
 {
 	const char *file = strrchr(path, '/');
 	if (file++ == NULL)
 		should_not_happen();
-	return strncmp(file, HCB_PREFIX, HCB_PREFIX_LEN) == 0;
-}
-
-static __attribute__((pure)) inline
-unsigned int is_hcb_4readdir(const char *name)
-{
-	return strncmp(name, HCB_PREFIX, HCB_PREFIX_LEN) == 0;
+	return is_hcb_name(file);
 }
 
 static int generic_permission(struct hcb *info, unsigned int mask)
@@ -645,7 +670,7 @@ static int posixovl_readdir(const char *path, void *buffer,
 
 	memset(&sb, 0, sizeof(sb));
 	while ((dentry = readdir(ptr)) != NULL) {
-		if (is_hcb_4readdir(dentry->d_name))
+		if (is_hcb_name(dentry->d_name))
 			continue;
 
 		sb.st_ino  = dentry->d_ino;
@@ -655,7 +680,7 @@ static int posixovl_readdir(const char *path, void *buffer,
 		if (!S_ISDIR(sb.st_mode) && !S_ISLNK(sb.st_mode))
 			sb.st_mode &= ~S_IXUGO;
 
-		ret = wd_real_hcb_lookup(path, dentry->d_name, &info);
+		ret = hcb_lookup_4readdir(path, dentry->d_name, &info);
 		if (ret < 0 && ret != -ENOENT && ret != -EACCES)
 			break;
 		else if (ret == 0)
