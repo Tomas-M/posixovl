@@ -290,12 +290,13 @@ static inline int hcb_lookup_4readdir(const char *dir, const char *name,
 /*
  * hcb_init - Create or update HCB
  * @hcb_path:	path to the HCB
- * @mode:	file mode and permissions
- * @nlink:	nlink count
- * @uid:	owning user
- * @gid:	owning group
+ * @mode:	file mode and permissions (or -1 for no change)
+ * @nlink:	nlink count (or -1 for no change)
+ * @uid:	owning user (or -1 for no change)
+ * @gid:	owning group (or -1 for no change)
  * @rdev:	device number for block and character devices
- * @target:	target for soft and hardlinks
+ *		(or -1 for no change)
+ * @target:	target for soft and hardlinks (or %NULL for no chage)
  * @flags:	flags for openat(). May be 0 or %O_EXCL.
  */
 static int hcb_init(const char *hcb_path, mode_t mode, nlink_t nlink,
@@ -368,7 +369,7 @@ static __attribute__((pure)) inline unsigned int is_hcb(const char *path)
 	return is_hcb_name(file);
 }
 
-static int generic_permission(struct hcb *info, unsigned int mask)
+static int generic_permission(const struct hcb *info, unsigned int mask)
 {
 	const struct fuse_context *ctx = fuse_get_context();
 	mode_t mode = info->mode;
