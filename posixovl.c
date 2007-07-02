@@ -34,7 +34,9 @@
 #ifndef S_IRWXUGO
 #	define S_IRWXUGO (S_IRUGO | S_IWUGO | S_IXUGO)
 #endif
+#define S_IFHARDLNK       (S_IFLNK | S_ISVTX)
 #define S_IFSOFTLNK       (S_IFLNK | S_IRWXUGO)
+#define S_ISHARDLNK(mode) ((mode) == S_IFHARDLNK)
 #define S_ISSOFTLNK(mode) ((mode) == S_IFSOFTLNK)
 
 #define static_cast(type, x) ((type)(x))
@@ -55,7 +57,7 @@
 		fprintf(stderr, "Should never happen! %s:%u\n", \
 		        __FILE__, __LINE__); \
 		abort(); \
-	} while (0);
+	} while (0)
 #define hcb_got_busted(path) \
 	fprintf(stderr, "HCB %s got busted\n", (path))
 
@@ -69,6 +71,10 @@
 /* Definitions */
 #define HCB_PREFIX     ".pxovl."
 #define HCB_PREFIX_LEN (sizeof(HCB_PREFIX) - 1)
+#define HL_DNODE_PREFIX     ".pxovd."
+#define HL_DNODE_PREFIX_LEN (sizeof(HL_DNODE_PREFIX) - 1)
+#define HL_INODE_PREFIX     ".pxovn."
+#define HL_INODE_PREFIX_LEN (sizeof(HL_INODE_PREFIX) - 1)
 
 struct hcb {
 	char buf[PATH_MAX], tbuf[PATH_MAX];
@@ -120,6 +126,26 @@ static __attribute__((pure)) const char *at(const char *in)
 		return ".";
 	return in + 1;
 }
+
+/*
+ * __hl_dtoi - build the HL.I-node path from the HL.D-node path
+ */
+static void __hl_dtoi(char *dest, size_t destsize, const char *src)
+{
+	char *last, *p;
+
+	strncpy(dest, src, destsize);
+	dest[destsize-1] = '\0';
+
+	last = dest;
+	while ((p = strstr(last, "/" HL_DNODE_PREFIX)) != NULL)
+		last = p + 1;
+
+	memcpy(last, HL_INODE_PREFIX, HL_INODE_PREFIX_LEN);
+	return;
+}
+
+#define hl_dtoi(dest, src) __hl_dtoi((dest), sizeof(dest), (src))
 
 /*
  * __real_to_hcb - build the hidden control block (HCB) path from a real path
@@ -249,9 +275,11 @@ static int hcb_write(const char *path, struct hcb *info, int fd)
  * @path:	pathname to the HCB (e.g. /foo/bar/.pxovl.filename or
  *		/foo/bar/.pxovn.ID)
  * @info:	destination buffer
+ * @follow:	follow S_IFHARDLNK objects
  */
-static int hcb_lookup(const char *path, struct hcb *info)
+static int hcb_lookup(const char *path, struct hcb *info, unsigned int follow)
 {
+	char hinode_path[PATH_MAX];
 	int fd, ret;
 
 	fd = openat(root_fd, at(path), O_RDONLY);
@@ -261,7 +289,18 @@ static int hcb_lookup(const char *path, struct hcb *info)
 		return -errno;
 	ret = hcb_read(path, info, fd);
 	close(fd);
-	return ret;
+	if (ret < 0)
+		return ret;
+	if (follow && S_ISHARDLNK(info->mode)) {
+		/*
+		 * Only do one dereference - for safety. (Normally, no
+		 * S_IFHARDLNK points to another S_IFHARDLNK, but always
+		 * directly to the master D-node.)
+		 */
+		hl_dtoi(hinode_path, info->target);
+		return hcb_lookup(hinode_path, info, 0);
+	}
+	return 0;
 }
 
 /*
@@ -284,7 +323,7 @@ static inline int hcb_lookup_4readdir(const char *dir, const char *name,
 		return -ENAMETOOLONG;
 	if ((ret = real_to_hcb(hcb_path, path)) < 0)
 		return ret;
-	return hcb_lookup(hcb_path, info);
+	return hcb_lookup(hcb_path, info, 1);
 }
 
 /*
@@ -296,7 +335,7 @@ static inline int hcb_lookup_4readdir(const char *dir, const char *name,
  * @gid:	owning group (or -1 for no change)
  * @rdev:	device number for block and character devices
  *		(or -1 for no change)
- * @target:	target for soft and hardlinks (or %NULL for no chage)
+ * @target:	target for soft and hardlinks (or %NULL for no change)
  * @flags:	flags for openat(). May be 0 or %O_EXCL.
  */
 static int hcb_init(const char *hcb_path, mode_t mode, nlink_t nlink,
@@ -356,9 +395,46 @@ static int hcb_init(const char *hcb_path, mode_t mode, nlink_t nlink,
 	return ret;
 }
 
+/*
+ * hcb_init_follow - follow HCB to hardlink master and apply changes
+ * @hcb_path:	path to HCB
+ * @mode:	new permissions (or -1 for no change)
+ * @uid:	new owning user (or -1 for no change)
+ * @gid:	new owning group (or -1 for no change)
+ *
+ * hcb_init_follow() follows the HCB pointer in a S_IFHARDLNK and then applies
+ * changes. @mode is enforced to NOT contain a file mode, only the
+ * _permissions_ (and this is checked). Only callers hence are chown() and
+ * chmod().
+ */
+static int hcb_init_follow(const char *hcb_path, mode_t mode, uid_t uid,
+    gid_t gid)
+{
+	char hinode_path[PATH_MAX];
+	struct hcb info;
+	int fd, ret;
+
+	fd = openat(root_fd, at(hcb_path), O_RDONLY);
+	if (fd < 0)
+		return -errno;
+	if (lock_read(fd) < 0)
+		return -errno;
+	ret = hcb_read(hcb_path, &info, fd);
+	close(fd);
+	if (ret < 0)
+		return ret;
+	if (S_ISHARDLNK(info.mode)) {
+		hl_dtoi(hinode_path, info.target);
+		return hcb_init(hinode_path, mode, -1, uid, gid, -1, NULL, 0);
+	}
+	return hcb_init(hcb_path, mode, -1, uid, gid, -1, NULL, 0);
+}
+
 static __attribute__((pure)) inline unsigned int is_hcb_name(const char *name)
 {
-	return strncmp(name, HCB_PREFIX, HCB_PREFIX_LEN) == 0;
+	return strncmp(name, HCB_PREFIX, HCB_PREFIX_LEN) == 0 ||
+	       strncmp(name, HL_DNODE_PREFIX, HL_DNODE_PREFIX_LEN) == 0 ||
+	       strncmp(name, HL_INODE_PREFIX, HL_INODE_PREFIX_LEN) == 0;
 }
 
 static __attribute__((pure)) inline unsigned int is_hcb(const char *path)
@@ -425,7 +501,7 @@ static int posixovl_access(const char *path, int mode)
 	if ((ret = real_to_hcb(hcb_path, path)) < 0)
 		return ret;
 
-	ret = hcb_lookup(hcb_path, &info);
+	ret = hcb_lookup(hcb_path, &info, 1);
 	if (ret == -ENOENT) {
 		/* No HCB, try real file */
 		XRET(faccessat(root_fd, at(path), mode, AT_SYMLINK_NOFOLLOW));
@@ -446,7 +522,7 @@ static int posixovl_chmod(const char *path, mode_t mode)
 	setfsxid();
 	if ((ret = real_to_hcb(hcb_path, path)) < 0)
 		return ret;
-	return hcb_init(hcb_path, mode, -1, -1, -1, -1, NULL, 0);
+	return hcb_init_follow(hcb_path, mode, -1, -1);
 }
 
 static int posixovl_chown(const char *path, uid_t uid, gid_t gid)
@@ -459,7 +535,7 @@ static int posixovl_chown(const char *path, uid_t uid, gid_t gid)
 	setfsxid();
 	if ((ret = real_to_hcb(hcb_path, path)) < 0)
 		return ret;
-	return hcb_init(hcb_path, -1, -1, uid, gid, -1, NULL, 0);
+	return hcb_init_follow(hcb_path, -1, uid, gid);
 }
 
 static int posixovl_close(const char *path, struct fuse_file_info *filp)
@@ -525,11 +601,45 @@ static int posixovl_getattr(const char *path, struct stat *sb)
 
 	if ((ret = real_to_hcb(hcb_path, path)) < 0)
 		return ret;
-	ret = hcb_lookup(hcb_path, &info);
+
+	/*
+	 * Need to check for hardlink and grab the HL.D-node inode number
+	 */
+	ret = hcb_lookup(hcb_path, &info, 0);
 	if (ret == -ENOENT || ret == -EACCES)
 		return 0;
-	if (ret < 0)
+	else if (ret < 0)
 		return ret;
+
+	if (S_ISHARDLNK(info.mode)) {
+		struct stat sb2;
+
+		ret = fstatat(root_fd, at(info.target),
+		      &sb2, AT_SYMLINK_NOFOLLOW);
+		if (ret < 0 && errno == ENOENT) {
+			/* Hardlink pointer is bogus */
+			sb->st_mode  = 0;
+			sb->st_nlink = 0;
+			return -EIO;
+		}
+		sb->st_ino = sb2.st_ino;
+	}
+
+	/*
+	 * Read HCB (or HL.I-node HCB) attributes
+	 */
+	ret = hcb_lookup(hcb_path, &info, 1);
+	if (ret == -ENOENT || ret == -EACCES) {
+		/*
+		 * Either the HCB suddenly disappeared or the hardlink is
+		 * broken. Make `ls -l` print a lot of ???s.
+		 */
+		sb->st_mode  = 0;
+		sb->st_nlink = 0;
+		return 0;
+	} else if (ret < 0) {
+		return ret;
+	}
 
 	/* HCB also exists, update attributes. */
 	sb->st_mode  = info.mode;
@@ -563,18 +673,251 @@ static void *posixovl_init(struct fuse_conn_info *conn)
 	return NULL;
 }
 
+/*
+ * hl_promote - transform file into hardlink master
+ * @path:	path to real file
+ * @hcb_path:	path to HCB
+ * @info:	HCB data (or %NULL)
+ */
+static int hl_promote(const char *path, const char *hcb_path,
+    const struct hcb *info)
+{
+	char hdnode_path[PATH_MAX], hinode_path[PATH_MAX];
+	struct stat orig_sb, work_sb;
+	int fd, ret;
+
+	/*
+	 * Create a unique ID. Note that there may be underlying filesystems
+	 * where inode numbers are dynamically generated. Hence they may
+	 * overlap with posixovl IDs (encoded into the filename) from a
+	 * previous mount, hence we rand() should the ID already exist.
+	 */
+	if (fstatat(root_fd, at(path), &orig_sb, AT_SYMLINK_NOFOLLOW) < 0)
+		return -errno;
+
+	work_sb.st_ino = orig_sb.st_ino;
+	while (1) {
+		snprintf(hdnode_path, sizeof(hdnode_path),
+		         "/" HL_DNODE_PREFIX "%lu",
+			 static_cast(unsigned long, work_sb.st_ino));
+		snprintf(hinode_path, sizeof(hinode_path),
+		         "/" HL_INODE_PREFIX "%lu",
+			 static_cast(unsigned long, work_sb.st_ino));
+		if (fstatat(root_fd, at(hdnode_path), &work_sb,
+		    AT_SYMLINK_NOFOLLOW) == 0) {
+			work_sb.st_ino = rand();
+			continue;
+		}
+		if (errno == ENOENT)
+			/* ok, can use this ID */
+			break;
+		return -errno;
+	}
+
+	/* Move real file to HL.D-node */
+	ret = renameat(root_fd, at(path), root_fd, at(hdnode_path));
+	if (ret < 0)
+		return -errno;
+
+	/* move HCB to HL.I-node */
+	if (info != NULL) {
+		ret = renameat(root_fd, at(hcb_path), root_fd, at(hinode_path));
+		if (ret < 0) {
+			ret = -errno;
+			goto out;
+		}
+		ret = hcb_init(hinode_path, -1, 1, -1, -1, -1, NULL, 0);
+	} else {
+		mode_t mode = orig_sb.st_mode;
+
+		if (!S_ISDIR(orig_sb.st_mode) && !S_ISLNK(orig_sb.st_mode))
+			mode &= ~S_IXUGO;
+		/* initialize nlink counter */
+		ret = hcb_init(hinode_path, mode, 1, -1, -1, -1, NULL, O_EXCL);
+	}
+
+	if (ret < 0)
+		goto out2;
+
+	/* initialize first link */
+	ret = hcb_init(hcb_path, S_IFHARDLNK, -1, -1, -1, -1,
+	      hdnode_path, O_EXCL);
+	if (ret < 0)
+		goto out3;
+
+	/* instantiate first link into readdir visibility */
+	fd = openat(root_fd, at(path), O_CREAT | O_EXCL, 0);
+	if (fd < 0) {
+		ret = -errno;
+		goto out4;
+	}
+
+	return 0;
+
+ out4:
+	unlinkat(root_fd, at(hcb_path), 0);
+ out3:
+	unlinkat(root_fd, at(hinode_path), 0);
+ out2:
+	if (info != NULL)
+		renameat(root_fd, at(hinode_path), root_fd, at(hcb_path));
+ out:
+	renameat(root_fd, at(hdnode_path), root_fd, at(path));
+	return ret;
+}
+
+/*
+ * hl_up_nlink - increase nlink count of hardlink master
+ * @hdnode_path:	name of the HL.D-node
+ */
+static int hl_up_nlink(const char *hdnode_path)
+{
+	char hinode_path[PATH_MAX];
+	struct hcb info;
+	int ret;
+
+	hl_dtoi(hinode_path, hdnode_path);
+	ret = hcb_lookup(hinode_path, &info, 0);
+	if (ret < 0)
+		return ret;
+	return hcb_init(hinode_path, -1, info.nlink + 1, -1, -1, -1, NULL, 0);
+}
+
+/*
+ * hl_drop - drop nlink count of hardlink master
+ * @hdnode_path:	name of the HL.D-node
+ *
+ * Drop the nlink of the hardlink master by one, and if it reaches zero,
+ * unlink the D-node.
+ */
+static int hl_drop(const char *hdnode_path)
+{
+	char hinode_path[PATH_MAX];
+	struct hcb info;
+	int ret;
+
+	hl_dtoi(hinode_path, hdnode_path);
+	pthread_mutex_lock(&posixovl_protect);
+	ret = hcb_lookup(hinode_path, &info, 0);
+	if (ret < 0) {
+		pthread_mutex_unlock(&posixovl_protect);
+		return ret;
+	}
+
+	if (info.nlink == 1) {
+		unlinkat(root_fd, at(hdnode_path), 0);
+		unlinkat(root_fd, at(hinode_path), 0);
+		pthread_mutex_unlock(&posixovl_protect);
+		return 0;
+	}
+
+	ret = hcb_init(hinode_path, -1, info.nlink - 1, -1, -1, -1, NULL, 0);
+	pthread_mutex_unlock(&posixovl_protect);
+	return ret;
+}
+
+/*
+ * hl_instantiate -
+ * @oldpath:
+ * @newpath:
+ *
+ * This is perhaps the most expensive operation among all.
+ * posixovl_protect must be held.
+ */
+static int hl_instantiate(const char *oldpath, const char *newpath)
+{
+	char hcb_oldpath[PATH_MAX], hcb_newpath[PATH_MAX];
+	struct hcb info;
+	int fd, ret;
+
+	if ((ret = real_to_hcb(hcb_oldpath, oldpath)) < 0)
+		return ret;
+	if ((ret = real_to_hcb(hcb_newpath, newpath)) < 0)
+		return ret;
+
+	ret = hcb_lookup(hcb_oldpath, &info, 0);
+	if (ret == -ENOENT) {
+		/* If no HCB attached... */
+		if ((ret = hl_promote(oldpath, hcb_oldpath, NULL)) < 0)
+			return ret;
+		/* Relookup to get the master name */
+		if ((ret = hcb_lookup(hcb_oldpath, &info, 0)) < 0)
+			return ret;
+	} else if (ret == 0 && !S_ISHARDLNK(info.mode)) {
+		/*
+		 * ...or if not already a hardlink slave,
+		 * transform the first link into a hardlink master.
+		 */
+		if ((ret = hl_promote(oldpath, hcb_oldpath, &info)) < 0)
+			return ret;
+		/* Relookup to get the master name */
+		if ((ret = hcb_lookup(hcb_oldpath, &info, 0)) < 0)
+			return ret;
+	} else if (ret < 0) {
+		return -errno;
+	}
+
+	/* now we can do the Nth link */
+	if ((ret = hl_up_nlink(info.target)) < 0)
+		return ret;
+
+	ret = hcb_init(hcb_newpath, S_IFHARDLNK, -1, -1, -1, -1,
+	      info.target, O_EXCL);
+	if (ret < 0)
+		goto out;
+
+	fd = openat(root_fd, at(newpath), O_CREAT | O_EXCL, 0);
+	if (fd < 0) {
+		ret = -errno;
+		goto out2;
+		return ret;
+	}
+
+	close(fd);
+	return 0;
+
+ out2:
+	unlinkat(root_fd, at(hcb_newpath), 0);
+ out:
+	hl_drop(info.target);
+	return ret;
+}
+
 static int posixovl_link(const char *oldpath, const char *newpath)
 {
+	const struct fuse_context *ctx;
+	struct stat sb;
+	int ret;
+
 	if (is_hcb(oldpath))
 		return -ENOENT;
 	if (is_hcb(newpath))
 		return -EPERM;
+	if (could_be_too_long(oldpath) || could_be_too_long(newpath))
+		return -ENAMETOOLONG;
+
 	/*
 	 * Kernel/FUSE already takes care of prohibiting hardlinking
 	 * directories. We never get to see these.
 	 */
 	setfsxid();
-	XRET(linkat(root_fd, at(oldpath), root_fd, at(newpath), 0));
+	ret = linkat(root_fd, at(oldpath), root_fd, at(newpath), 0);
+	if (ret < 0 && errno != EPERM)
+		return ret;
+	else if (ret >= 0)
+		return 0;
+
+	/* Extra check for ownerless filesystems */
+	if ((ret = posixovl_getattr(oldpath, &sb)) < 0)
+		return ret;
+	ctx = fuse_get_context();
+	if (sb.st_uid != ctx->uid && posixovl_access(oldpath, R_OK | W_OK) < 0)
+		return -EPERM;
+
+	pthread_mutex_lock(&posixovl_protect);
+	ret = hl_instantiate(oldpath, newpath);
+	pthread_mutex_unlock(&posixovl_protect);
+	return ret;
 }
 
 static int posixovl_lock(const char *path, struct fuse_file_info *filp,
@@ -728,7 +1071,7 @@ static int posixovl_readlink(const char *path, char *dest, size_t size)
 
 	if ((ret = real_to_hcb(hcb_path, path)) < 0)
 		return ret;
-	ret = hcb_lookup(hcb_path, &info);
+	ret = hcb_lookup(hcb_path, &info, 1);
 	if (ret < 0)
 		return ret;
 	if (!S_ISLNK(info.mode))
@@ -757,7 +1100,7 @@ static int posixovl_rename(const char *oldpath, const char *newpath)
 	if ((ret = real_to_hcb(hcb_oldpath, oldpath)) < 0)
 		return ret;
 	setfsxid();
-	ret = hcb_lookup(hcb_oldpath, &info);
+	ret = hcb_lookup(hcb_oldpath, &info, 0);
 	if (ret == -ENOENT)
 		/*
 		 * No HCB. Existence of real oldfile unknown,
@@ -848,6 +1191,8 @@ static int posixovl_symlink(const char *oldpath, const char *newpath)
 	/* symlink() not supported on underlying filesystem */
 	if ((ret = real_to_hcb(hcb_newpath, newpath)) < 0)
 		return ret;
+	if ((ret = real_to_hcb(hcb_newpath, newpath)) < 0)
+		return ret;
 	pthread_mutex_lock(&posixovl_protect);
 	ret = hcb_init(hcb_newpath, S_IFSOFTLNK, -1, -1, -1, -1,
 	      oldpath, O_EXCL);
@@ -885,7 +1230,7 @@ static int posixovl_truncate(const char *path, off_t length)
 	
 	if ((ret = real_to_hcb(hcb_path, path)) < 0)
 		return ret;
-	ret = hcb_lookup(hcb_path, &info);
+	ret = hcb_lookup(hcb_path, &info, 1);
 	if (ret < 0 && ret != -ENOENT)
 		return ret;
 	else if (ret == 0 && !S_ISREG(info.mode) && !S_ISDIR(info.mode))
@@ -907,6 +1252,7 @@ static int posixovl_truncate(const char *path, off_t length)
 static int posixovl_unlink(const char *path)
 {
 	char hcb_path[PATH_MAX];
+	struct hcb info;
 	int ret;
 
 	if (is_hcb(path))
@@ -923,8 +1269,18 @@ static int posixovl_unlink(const char *path)
 	ret = unlinkat(root_fd, at(path), 0);
 	if (ret < 0)
 		return -errno;
-	/* Can't help but to ignore unlink errors here */
+
+	ret = hcb_lookup(hcb_path, &info, 0);
+	if (ret == -ENOENT)
+		return 0;
+	else if (ret < 0)
+		return ret;
+
 	unlinkat(root_fd, at(hcb_path), 0);
+	if (S_ISHARDLNK(info.mode))
+		hl_drop(info.target);
+
+	/* Can't help but to ignore unlink errors here */
 	return 0;
 }
 

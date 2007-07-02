@@ -11,12 +11,15 @@ Supports:
 
 Does not support:
 	ACLs/xattrs
-	Hard links
 
 Terminology:
 	Real file:                  /source/foo.txt
 	Hidden control block (HCB): /source/.pxovl.foo.txt
 	Virtual file:               /target/foo.txt
+
+	Hardlink master:
+	HL.D-node:                  /source/.pxovd.ID
+	HL.I-node:                  /source/.pxovn.ID	
 
 Notes:
 	If no HCB exists for a file or directory, the default permissions are
