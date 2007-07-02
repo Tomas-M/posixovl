@@ -72,7 +72,7 @@
 
 struct hcb {
 	char buf[PATH_MAX], tbuf[PATH_MAX];
-	const char *s_mode, *s_nlink, *s_uid, *s_gid, *s_rdev, *s_target;
+	const char *target;
 	mode_t mode;
 	nlink_t nlink;
 	uid_t uid;
@@ -158,6 +158,7 @@ static int __real_to_hcb(char *dest, size_t destsize, const char *src)
 
 static int hcb_read(const char *path, struct hcb *info, int fd)
 {
+	const char *s_mode, *s_nlink, *s_uid, *s_gid, *s_rdev;
 	char *toul_ptr = NULL;
 	ssize_t ret;
 
@@ -166,30 +167,34 @@ static int hcb_read(const char *path, struct hcb *info, int fd)
 	info->buf[ret] = '\0';
 	if (ret == 0)
 		return -ENOENT;
-	info->size   = ret;
-	info->s_mode = info->buf;
-	info->s_nlink = strchr(info->buf, ' ');
-	if (info->s_nlink++ == NULL)
-		goto busted;
-	info->s_uid  = strchr(info->s_nlink, ' ');
-	if (info->s_uid++ == NULL)
-		goto busted;
-	info->s_gid = strchr(info->s_uid, ' ');
-	if (info->s_gid++ == NULL)
-		goto busted;
-	info->s_rdev = strchr(info->s_gid, ' ');
-	if (info->s_rdev++ == NULL)
-		goto busted;
-	info->s_target = strchr(info->s_rdev, ' ');
-	if (info->s_target++ == NULL)
+	info->size = ret;
+
+	s_mode  = info->buf;
+	s_nlink = strchr(info->buf, ' ');
+	if (s_nlink++ == NULL)
 		goto busted;
 
-	info->mode = strtoul(info->s_mode, NULL, 8);
-	info->nlink = strtoul(info->s_nlink, NULL, 0);
-	info->uid  = strtoul(info->s_uid, NULL, 0);
-	info->gid  = strtoul(info->s_gid, NULL, 0);
+	s_uid = strchr(s_nlink, ' ');
+	if (s_uid++ == NULL)
+		goto busted;
 
-	info->rdev = strtoul(info->s_rdev, &toul_ptr, 0);
+	s_gid = strchr(s_uid, ' ');
+	if (s_gid++ == NULL)
+		goto busted;
+
+	s_rdev = strchr(s_gid, ' ');
+	if (s_rdev++ == NULL)
+		goto busted;
+
+	info->target = strchr(s_rdev, ' ');
+	if (info->target++ == NULL)
+		goto busted;
+
+	info->mode  = strtoul(s_mode, NULL, 8);
+	info->nlink = strtoul(s_nlink, NULL, 0);
+	info->uid   = strtoul(s_uid, NULL, 0);
+	info->gid   = strtoul(s_gid, NULL, 0);
+	info->rdev  = strtoul(s_rdev, &toul_ptr, 0);
 	if (toul_ptr == NULL || *toul_ptr != ':')
 		goto busted;
 	++toul_ptr;
@@ -310,6 +315,8 @@ static int hcb_init(const char *path, mode_t mode, nlink_t nlink, uid_t uid,
 		info.uid    = ctx->uid;
 		info.gid    = ctx->gid;
 		info.rdev   = 0;
+		info.size   = 0;
+		info.target = NULL;
 	} else if (ret < 0) {
 		goto err;
 	}
@@ -328,9 +335,9 @@ static int hcb_init(const char *path, mode_t mode, nlink_t nlink, uid_t uid,
 
 	if (target != NULL)
 		strncpy(info.tbuf, target, sizeof(info.tbuf));
-	else if (info.s_target != NULL)
-		/* move symlink target out of the way */
-		strncpy(info.tbuf, info.s_target, sizeof(info.tbuf));
+	else if (info.target != NULL)
+		/* move symlink target out of the way (from buf into tbuf) */
+		strncpy(info.tbuf, info.target, sizeof(info.tbuf));
 	else
 		*info.tbuf = '\0';
 	info.tbuf[sizeof(info.tbuf)-1] = '\0';
@@ -708,7 +715,7 @@ static int posixovl_readlink(const char *path, char *dest, size_t size)
 		return -EINVAL; /* not a symbolic link */
 
 	memset(dest, 0, size);
-	strncpy(dest, info.s_target, size - 1);
+	strncpy(dest, info.target, size - 1);
 	return 0;
 }
 
