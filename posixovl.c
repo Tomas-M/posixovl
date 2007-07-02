@@ -577,9 +577,34 @@ static int posixovl_ftruncate(const char *path, off_t length,
 	XRET(ftruncate(filp->fh, length));
 }
 
+static int hl_demote(const char *hdnode_path, const char *path,
+    const char *hcb_path)
+{
+	char hinode_path[PATH_MAX];
+	int ret;
+
+	hl_dtoi(hinode_path, hdnode_path);
+	pthread_mutex_lock(&posixovl_protect);
+	if (unlinkat(root_fd, at(path), 0) < 0) {
+		pthread_mutex_unlock(&posixovl_protect);
+		return -errno;
+	}
+	unlinkat(root_fd, at(hcb_path), 0);
+	if (renameat(root_fd, at(hdnode_path), root_fd, at(path)) < 0) {
+		pthread_mutex_unlock(&posixovl_protect);
+		ret = -errno;
+		fprintf(stderr, "Inconsistency (1) during hardlink demotion!\n");
+		return ret;
+	}
+	if (renameat(root_fd, at(hinode_path), root_fd, at(hcb_path)) < 0)
+		fprintf(stderr, "Inconsistency (2) during hardlink demotion!\n");
+	pthread_mutex_unlock(&posixovl_protect);
+	return 0;
+}
+
 static int posixovl_getattr(const char *path, struct stat *sb)
 {
-	struct hcb info;
+	struct hcb info_first, info_last;
 	char hcb_path[PATH_MAX];
 	int ret;
 
@@ -605,16 +630,16 @@ static int posixovl_getattr(const char *path, struct stat *sb)
 	/*
 	 * Need to check for hardlink and grab the HL.D-node inode number
 	 */
-	ret = hcb_lookup(hcb_path, &info, 0);
+	ret = hcb_lookup(hcb_path, &info_first, 0);
 	if (ret == -ENOENT || ret == -EACCES)
 		return 0;
 	else if (ret < 0)
 		return ret;
 
-	if (S_ISHARDLNK(info.mode)) {
+	if (S_ISHARDLNK(info_first.mode)) {
 		struct stat sb2;
 
-		ret = fstatat(root_fd, at(info.target),
+		ret = fstatat(root_fd, at(info_first.target),
 		      &sb2, AT_SYMLINK_NOFOLLOW);
 		if (ret < 0 && errno == ENOENT) {
 			/* Hardlink pointer is bogus */
@@ -628,7 +653,7 @@ static int posixovl_getattr(const char *path, struct stat *sb)
 	/*
 	 * Read HCB (or HL.I-node HCB) attributes
 	 */
-	ret = hcb_lookup(hcb_path, &info, 1);
+	ret = hcb_lookup(hcb_path, &info_last, 1);
 	if (ret == -ENOENT || ret == -EACCES) {
 		/*
 		 * Either the HCB suddenly disappeared or the hardlink is
@@ -642,13 +667,15 @@ static int posixovl_getattr(const char *path, struct stat *sb)
 	}
 
 	/* HCB also exists, update attributes. */
-	sb->st_mode  = info.mode;
-	sb->st_nlink = info.nlink;
-	sb->st_uid   = info.uid;
-	sb->st_gid   = info.gid;
-	sb->st_rdev  = info.rdev;
-	if (!S_ISREG(info.mode) && !S_ISDIR(info.mode))
-		sb->st_size = info.size;
+	sb->st_mode  = info_last.mode;
+	sb->st_nlink = info_last.nlink;
+	sb->st_uid   = info_last.uid;
+	sb->st_gid   = info_last.gid;
+	sb->st_rdev  = info_last.rdev;
+	if (!S_ISREG(info_last.mode) && !S_ISDIR(info_last.mode))
+		sb->st_size = info_last.size;
+	if (S_ISHARDLNK(info_first.mode) && info_last.nlink == 1)
+		hl_demote(info_first.target, path, hcb_path);
 	return 0;
 }
 
