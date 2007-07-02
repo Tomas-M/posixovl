@@ -89,7 +89,7 @@ static pthread_mutex_t posixovl_protect = PTHREAD_MUTEX_INITIALIZER;
 
 static inline int lock_read(int fd)
 {
-	struct flock fl = {
+	static const struct flock fl = {
 		.l_type   = F_RDLCK,
 		.l_whence = SEEK_SET,
 		.l_start  = 0,
@@ -100,7 +100,7 @@ static inline int lock_read(int fd)
 
 static inline int lock_write(int fd)
 {
-	struct flock fl = {
+	static const struct flock fl = {
 		.l_type   = F_WRLCK,
 		.l_whence = SEEK_SET,
 		.l_start  = 0,
@@ -224,14 +224,15 @@ static int hcb_write(const char *path, struct hcb *info, int fd)
 	lseek(fd, 0, SEEK_SET);
 	ftruncate(fd, 0);
 	ret = snprintf(info->buf, sizeof(info->buf), "%o %u %lu %lu %lu:%lu %s",
-	      (unsigned int)info->mode, (unsigned int)info->nlink,
+	      static_cast(unsigned int, info->mode),
+	      static_cast(unsigned int, info->nlink),
 	      static_cast(unsigned long, info->uid),
-	      static_cast(unsigned long, info->gid), COMPAT_MAJOR(info->rdev),
-	      COMPAT_MINOR(info->rdev), info->tbuf);
+	      static_cast(unsigned long, info->gid),
+	      COMPAT_MAJOR(info->rdev), COMPAT_MINOR(info->rdev), info->tbuf);
 	if (ret >= sizeof(info->buf))
 		return -EIO;
 
-	z = strlen(info->buf);
+	z   = strlen(info->buf);
 	ret = write(fd, info->buf, z);
 	if (ret < 0)
 		return -errno;
@@ -275,19 +276,20 @@ static int hcb_lookup(const char *path, struct hcb *info)
 static inline int hcb_lookup_4readdir(const char *dir, const char *name,
     struct hcb *info)
 {
-	char path[PATH_MAX], spec_path[PATH_MAX];
+	char path[PATH_MAX], hcb_path[PATH_MAX];
 	int ret;
+
 	ret = snprintf(path, sizeof(path), "%s%s", dir, name);
 	if (ret >= sizeof(path))
 		return -ENAMETOOLONG;
-	if ((ret = real_to_hcb(spec_path, path)) < 0)
+	if ((ret = real_to_hcb(hcb_path, path)) < 0)
 		return ret;
-	return hcb_lookup(spec_path, info);
+	return hcb_lookup(hcb_path, info);
 }
 
 /*
  * hcb_init - Create or update HCB
- * @spec_path:	path to the HCB
+ * @hcb_path:	path to the HCB
  * @mode:	file mode and permissions
  * @nlink:	nlink count
  * @uid:	owning user
@@ -296,7 +298,7 @@ static inline int hcb_lookup_4readdir(const char *dir, const char *name,
  * @target:	target for soft and hardlinks
  * @flags:	flags for openat(). May be 0 or %O_EXCL.
  */
-static int hcb_init(const char *spec_path, mode_t mode, nlink_t nlink,
+static int hcb_init(const char *hcb_path, mode_t mode, nlink_t nlink,
     uid_t uid, gid_t gid, dev_t rdev, const char *target, unsigned int flags)
 {
 	struct hcb info;
@@ -305,13 +307,13 @@ static int hcb_init(const char *spec_path, mode_t mode, nlink_t nlink,
 	if (flags != 0 && flags != O_EXCL)
 		should_not_happen();
 
-	fd = openat(root_fd, at(spec_path), O_RDWR | O_CREAT | flags,
+	fd = openat(root_fd, at(hcb_path), O_RDWR | O_CREAT | flags,
 	     S_IRUGO | S_IWUSR);
 	if (fd < 0)
 		return -errno;
 	if (lock_write(fd) < 0)
 		return -errno;
-	ret = hcb_read(spec_path, &info, fd);
+	ret = hcb_read(hcb_path, &info, fd);
 	if (ret == -ENOENT) {
 		const struct fuse_context *ctx = fuse_get_context();
 		info.mode   = mode;
@@ -347,7 +349,7 @@ static int hcb_init(const char *spec_path, mode_t mode, nlink_t nlink,
 	info.tbuf[sizeof(info.tbuf)-1] = '\0';
 
 	/* write out */
-	ret = hcb_write(spec_path, &info, fd);
+	ret = hcb_write(hcb_path, &info, fd);
  err:
 	close(fd);
 	return ret;
@@ -412,17 +414,17 @@ static inline void setrexid(void)
 
 static int posixovl_access(const char *path, int mode)
 {
-	char spec_path[PATH_MAX];
+	char hcb_path[PATH_MAX];
 	struct hcb info;
 	int ret;
 
 	if (is_hcb(path))
 		return -ENOENT;
 	setrexid();
-	if ((ret = real_to_hcb(spec_path, path)) < 0)
+	if ((ret = real_to_hcb(hcb_path, path)) < 0)
 		return ret;
 
-	ret = hcb_lookup(spec_path, &info);
+	ret = hcb_lookup(hcb_path, &info);
 	if (ret == -ENOENT) {
 		/* No HCB, try real file */
 		XRET(faccessat(root_fd, at(path), mode, AT_SYMLINK_NOFOLLOW));
@@ -501,7 +503,7 @@ static int posixovl_ftruncate(const char *path, off_t length,
 static int posixovl_getattr(const char *path, struct stat *sb)
 {
 	struct hcb info;
-	char spec_path[PATH_MAX];
+	char hcb_path[PATH_MAX];
 	int ret;
 
 	if (is_hcb(path))
@@ -520,20 +522,20 @@ static int posixovl_getattr(const char *path, struct stat *sb)
 		 */
 		sb->st_mode &= ~S_IXUGO;
 
-	if ((ret = real_to_hcb(spec_path, path)) < 0)
+	if ((ret = real_to_hcb(hcb_path, path)) < 0)
 		return ret;
-	ret = hcb_lookup(spec_path, &info);
+	ret = hcb_lookup(hcb_path, &info);
 	if (ret == -ENOENT || ret == -EACCES)
 		return 0;
 	if (ret < 0)
 		return ret;
 
 	/* HCB also exists, update attributes. */
-	sb->st_mode = info.mode;
+	sb->st_mode  = info.mode;
 	sb->st_nlink = info.nlink;
-	sb->st_uid  = info.uid;
-	sb->st_gid  = info.gid;
-	sb->st_rdev = info.rdev;
+	sb->st_uid   = info.uid;
+	sb->st_gid   = info.gid;
+	sb->st_rdev  = info.rdev;
 	return 0;
 }
 
@@ -660,11 +662,11 @@ static int posixovl_read(const char *path, char *buffer, size_t size,
 static int posixovl_readdir(const char *path, void *buffer,
     fuse_fill_dir_t filldir, off_t offset, struct fuse_file_info *filp)
 {
+	const struct dirent *dentry;
 	struct hcb info;
-	struct dirent *dentry;
 	struct stat sb;
-	DIR *ptr;
 	int ret = 0;
+	DIR *ptr;
 
 	if (is_hcb(path))
 		return -ENOENT;
@@ -708,7 +710,7 @@ static int posixovl_readdir(const char *path, void *buffer,
 static int posixovl_readlink(const char *path, char *dest, size_t size)
 {
 	struct hcb info;
-	char spec_path[PATH_MAX];
+	char hcb_path[PATH_MAX];
 	int ret;
 
 	if (is_hcb(path))
@@ -721,9 +723,9 @@ static int posixovl_readlink(const char *path, char *dest, size_t size)
 	else if (ret >= 0)
 		return 0;
 
-	if ((ret = real_to_hcb(spec_path, path)) < 0)
+	if ((ret = real_to_hcb(hcb_path, path)) < 0)
 		return ret;
-	ret = hcb_lookup(spec_path, &info);
+	ret = hcb_lookup(hcb_path, &info);
 	if (ret < 0)
 		return ret;
 	if (!S_ISLNK(info.mode))
@@ -736,10 +738,10 @@ static int posixovl_readlink(const char *path, char *dest, size_t size)
 
 static int posixovl_rename(const char *oldpath, const char *newpath)
 {
-	char spec_oldpath[PATH_MAX], spec_newpath[PATH_MAX];
+	char hcb_oldpath[PATH_MAX], hcb_newpath[PATH_MAX];
 	struct hcb info;
-	int ret, ret_1, ret_2;
 	struct stat sb;
+	int ret, ret_2;
 
 	if (is_hcb(oldpath))
 		return -ENOENT;
@@ -749,10 +751,10 @@ static int posixovl_rename(const char *oldpath, const char *newpath)
 		return -ENAMETOOLONG;
 
 	/* We do not check for a real file until fstatat(). */
-	if ((ret = real_to_hcb(spec_oldpath, oldpath)) < 0)
+	if ((ret = real_to_hcb(hcb_oldpath, oldpath)) < 0)
 		return ret;
 	setfsxid();
-	ret = hcb_lookup(spec_oldpath, &info);
+	ret = hcb_lookup(hcb_oldpath, &info);
 	if (ret == -ENOENT)
 		/*
 		 * No HCB. Existence of real oldfile unknown,
@@ -763,7 +765,7 @@ static int posixovl_rename(const char *oldpath, const char *newpath)
 		return ret;
 
 	/* HCB exists. */
-	if ((ret = real_to_hcb(spec_newpath, newpath)) < 0)
+	if ((ret = real_to_hcb(hcb_newpath, newpath)) < 0)
 		return ret;
 	ret = fstatat(root_fd, at(oldpath), &sb, AT_SYMLINK_NOFOLLOW);
 	if (ret < 0) {
@@ -771,26 +773,27 @@ static int posixovl_rename(const char *oldpath, const char *newpath)
 			/*
 			 * Old HCB exists, real oldfile not, also simple.
 			 */
-			XRET(renameat(root_fd, at(spec_oldpath),
-			              root_fd, at(spec_newpath)));
+			XRET(renameat(root_fd, at(hcb_oldpath),
+			              root_fd, at(hcb_newpath)));
 		else
 			return -errno;
 	}
 
 	/* Real oldfile _and_ an old HCB. Needs special locking. */
 	pthread_mutex_lock(&posixovl_protect);
-	ret_1 = renameat(root_fd, at(oldpath), root_fd, at(newpath));
-	if (ret_1 < 0) {
+	ret_2 = renameat(root_fd, at(oldpath), root_fd, at(newpath));
+	if (ret_2 < 0) {
+		ret = -errno;
 		pthread_mutex_unlock(&posixovl_protect);
-		return -errno;
+		return ret;
 	}
-	ret_2 = renameat(root_fd, at(spec_oldpath), root_fd, at(spec_newpath));
+	ret_2 = renameat(root_fd, at(hcb_oldpath), root_fd, at(hcb_newpath));
 	if (ret_2 < 0) {
 		/* !@#$%^& - error. Need to rename old file back. */
 		ret = -errno;
 		if (renameat(root_fd, at(newpath), root_fd, at(oldpath)) < 0)
 			/* Even that failed. Keep new name, but kill HCB. */
-			unlinkat(root_fd, at(spec_oldpath), 0);
+			unlinkat(root_fd, at(hcb_oldpath), 0);
 
 		pthread_mutex_unlock(&posixovl_protect);
 		return ret;
@@ -802,15 +805,15 @@ static int posixovl_rename(const char *oldpath, const char *newpath)
 
 static int posixovl_rmdir(const char *path)
 {
-	char spec_path[PATH_MAX];
+	char hcb_path[PATH_MAX];
 	int ret;
 
 	if (is_hcb(path))
 		return -ENOENT;
-	if ((ret = real_to_hcb(spec_path, path)) < 0)
+	if ((ret = real_to_hcb(hcb_path, path)) < 0)
 		return ret;
 	setfsxid();
-	if (unlinkat(root_fd, spec_path, 0) < 0 && errno != ENOENT)
+	if (unlinkat(root_fd, hcb_path, 0) < 0 && errno != ENOENT)
 		return -errno;
 	XRET(unlinkat(root_fd, at(path), AT_REMOVEDIR));
 }
@@ -862,7 +865,7 @@ static int posixovl_symlink(const char *oldpath, const char *newpath)
 
 static int posixovl_truncate(const char *path, off_t length)
 {
-	char spec_path[PATH_MAX];
+	char hcb_path[PATH_MAX];
 	struct hcb info;
 	int fd, ret;
 
@@ -877,9 +880,9 @@ static int posixovl_truncate(const char *path, off_t length)
 	if (fd < 0)
 		return -errno;
 	
-	if ((ret = real_to_hcb(spec_path, path)) < 0)
+	if ((ret = real_to_hcb(hcb_path, path)) < 0)
 		return ret;
-	ret = hcb_lookup(spec_path, &info);
+	ret = hcb_lookup(hcb_path, &info);
 	if (ret < 0 && ret != -ENOENT)
 		return ret;
 	else if (ret == 0 && !S_ISREG(info.mode) && !S_ISDIR(info.mode))
@@ -900,12 +903,12 @@ static int posixovl_truncate(const char *path, off_t length)
 
 static int posixovl_unlink(const char *path)
 {
-	char spec_path[PATH_MAX];
+	char hcb_path[PATH_MAX];
 	int ret;
 
 	if (is_hcb(path))
 		return -ENOENT;
-	if ((ret = real_to_hcb(spec_path, path)) < 0)
+	if ((ret = real_to_hcb(hcb_path, path)) < 0)
 		return ret;
 
 	/*
@@ -918,7 +921,7 @@ static int posixovl_unlink(const char *path)
 	if (ret < 0)
 		return -errno;
 	/* Can't help but to ignore unlink errors here */
-	unlinkat(root_fd, at(spec_path), 0);
+	unlinkat(root_fd, at(hcb_path), 0);
 	return 0;
 }
 
