@@ -250,26 +250,6 @@ static int hcb_lookup(const char *path, struct hcb *info)
 }
 
 /*
- * wd_hcb_lookup -
- * @dir:	working directory
- * @name:	file
- * @info:	
- *
- * Combines the working directory @dir with @name (to form an absolute path)
- * then calls hcb_lookup().
- */
-static inline int wd_hcb_lookup(const char *dir, const char *name,
-    struct hcb *info)
-{
-	char path[PATH_MAX];
-	int ret;
-	ret = snprintf(path, sizeof(path), "%s%s", dir, name);
-	if (ret >= sizeof(path))
-		return -ENAMETOOLONG;
-	return hcb_lookup(path, info);
-}
-
-/*
  * wd_real_hcb_lookup -
  * @dir:	working directory
  * @name:	file
