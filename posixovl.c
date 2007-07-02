@@ -328,9 +328,11 @@ static int hcb_init(const char *path, mode_t mode, nlink_t nlink, uid_t uid,
 
 	if (target != NULL)
 		strncpy(info.tbuf, target, sizeof(info.tbuf));
-	else
+	else if (info.s_target != NULL)
 		/* move symlink target out of the way */
 		strncpy(info.tbuf, info.s_target, sizeof(info.tbuf));
+	else
+		*info.tbuf = '\0';
 	info.tbuf[sizeof(info.tbuf)-1] = '\0';
 
 	/* write out */
