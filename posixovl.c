@@ -296,18 +296,14 @@ static inline int hcb_lookup_4readdir(const char *dir, const char *name,
  * @target:	target for soft and hardlinks
  * @flags:	flags for openat(). May be 0 or %O_EXCL.
  */
-static int hcb_init(const char *path, mode_t mode, nlink_t nlink, uid_t uid,
-    gid_t gid, dev_t rdev, const char *target, unsigned int flags)
+static int hcb_init(const char *spec_path, mode_t mode, nlink_t nlink,
+    uid_t uid, gid_t gid, dev_t rdev, const char *target, unsigned int flags)
 {
 	struct hcb info;
-	char spec_path[PATH_MAX];
 	int fd, ret;
 
 	if (flags != 0 && flags != O_EXCL)
 		should_not_happen();
-
-	if ((ret = real_to_hcb(spec_path, path)) < 0)
-		return ret;
 
 	fd = openat(root_fd, at(spec_path), O_RDWR | O_CREAT | flags,
 	     S_IRUGO | S_IWUSR);
@@ -440,18 +436,28 @@ static int posixovl_access(const char *path, int mode)
 
 static int posixovl_chmod(const char *path, mode_t mode)
 {
+	char hcb_path[PATH_MAX];
+	int ret;
+
 	if (is_hcb(path))
 		return -ENOENT;
 	setfsxid();
-	return hcb_init(path, mode, -1, -1, -1, -1, NULL, 0);
+	if ((ret = real_to_hcb(hcb_path, path)) < 0)
+		return ret;
+	return hcb_init(hcb_path, mode, -1, -1, -1, -1, NULL, 0);
 }
 
 static int posixovl_chown(const char *path, uid_t uid, gid_t gid)
 {
+	char hcb_path[PATH_MAX];
+	int ret;
+
 	if (is_hcb(path))
 		return -ENOENT;
 	setfsxid();
-	return hcb_init(path, -1, -1, uid, gid, -1, NULL, 0);
+	if ((ret = real_to_hcb(hcb_path, path)) < 0)
+		return ret;
+	return hcb_init(hcb_path, -1, -1, uid, gid, -1, NULL, 0);
 }
 
 static int posixovl_close(const char *path, struct fuse_file_info *filp)
@@ -586,6 +592,7 @@ static int posixovl_mkdir(const char *path, mode_t mode)
 
 static int posixovl_mknod(const char *path, mode_t mode, dev_t rdev)
 {
+	char hcb_path[PATH_MAX];
 	int fd, ret;
 
 	if (is_hcb(path))
@@ -598,15 +605,15 @@ static int posixovl_mknod(const char *path, mode_t mode, dev_t rdev)
 	else if (ret >= 0)
 		return 0;
 
-	if (could_be_too_long(path))
-		return -ENAMETOOLONG;
+	if ((ret = real_to_hcb(hcb_path, path)) < 0)
+		return ret;
 	/*
 	 * The HCB is created first - since that one does not show up in
 	 * readdir() and is not accessible either.
 	 * Same goes for posixovl_symlink().
 	 */
 	pthread_mutex_lock(&posixovl_protect);
-	ret = hcb_init(path, mode, -1, -1, -1, rdev, NULL, O_EXCL);
+	ret = hcb_init(hcb_path, mode, -1, -1, -1, rdev, NULL, O_EXCL);
 	if (ret < 0) {
 		pthread_mutex_unlock(&posixovl_protect);
 		return ret;
@@ -819,6 +826,7 @@ static int posixovl_statfs(const char *path, struct statvfs *sb)
 
 static int posixovl_symlink(const char *oldpath, const char *newpath)
 {
+	char hcb_newpath[PATH_MAX];
 	int fd, ret;
 
 	if (is_hcb(newpath))
@@ -831,13 +839,12 @@ static int posixovl_symlink(const char *oldpath, const char *newpath)
 	else if (ret >= 0)
 		return 0;
 
-	if (could_be_too_long(newpath))
-		return -ENAMETOOLONG;
-
 	/* symlink() not supported on underlying filesystem */
-
+	if ((ret = real_to_hcb(hcb_newpath, newpath)) < 0)
+		return ret;
 	pthread_mutex_lock(&posixovl_protect);
-	ret = hcb_init(newpath, S_IFSOFTLNK, -1, -1, -1, -1, oldpath, O_EXCL);
+	ret = hcb_init(hcb_newpath, S_IFSOFTLNK, -1, -1, -1, -1,
+	      oldpath, O_EXCL);
 	if (ret < 0) {
 		pthread_mutex_unlock(&posixovl_protect);
 		return ret;
