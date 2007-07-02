@@ -908,11 +908,18 @@ static int posixovl_unlink(const char *path)
 	if ((ret = real_to_hcb(spec_path, path)) < 0)
 		return ret;
 
+	/*
+	 * Need to unlink the real file first so that the potential case
+	 * "HCB non-existant but real file existant" does not happen in
+	 * readdir().
+	 */
 	setfsxid();
-	/* Ignore if HCB not found */
-	if (unlinkat(root_fd, at(spec_path), 0) < 0 && errno != ENOENT)
+	ret = unlinkat(root_fd, at(path), 0);
+	if (ret < 0)
 		return -errno;
-	XRET(unlinkat(root_fd, at(path), 0));
+	/* Can't help but to ignore unlink errors here */
+	unlinkat(root_fd, at(spec_path), 0);
+	return 0;
 }
 
 static int posixovl_utimens(const char *path, const struct timespec *ts)
