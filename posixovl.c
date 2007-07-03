@@ -607,6 +607,35 @@ static int hl_demote(const char *hdnode_path, const char *path,
 	return 0;
 }
 
+static int hl_try_demote(const char *path)
+{
+	char hcb_path[PATH_MAX], hinode_path[PATH_MAX];
+	struct hcb info_first, info_last;
+	int ret;
+
+	if ((ret = real_to_hcb(hcb_path, path)) < 0)
+		return ret;
+
+	ret = hcb_lookup(hcb_path, &info_first, 0);
+	if (ret < 0 && (errno == ENOENT || errno == EACCES))
+		return 0;
+	else if (ret < 0)
+		return ret;
+	else if (!S_ISHARDLNK(info_first.mode))
+		return 0;
+
+	hl_dtoi(hinode_path, info_first.target);
+	ret = hcb_lookup(hinode_path, &info_last, 1);
+	if (ret < 0 && (errno == ENOENT || errno == EACCES))
+		return 0;
+	else if (ret < 0)
+		return ret;
+	else if (info_last.nlink != 1)
+		return 0;
+
+	return hl_demote(info_first.target, path, hcb_path);
+}
+
 static int posixovl_getattr(const char *path, struct stat *sb)
 {
 	struct hcb info_first, info_last;
@@ -680,8 +709,6 @@ static int posixovl_getattr(const char *path, struct stat *sb)
 	sb->st_rdev  = info_last.rdev;
 	if (!S_ISREG(info_last.mode) && !S_ISDIR(info_last.mode))
 		sb->st_size = info_last.size;
-	if (S_ISHARDLNK(info_first.mode) && info_last.nlink == 1)
-		hl_demote(info_first.target, path, hcb_path);
 	return 0;
 }
 
@@ -1012,14 +1039,16 @@ static int posixovl_mknod(const char *path, mode_t mode, dev_t rdev)
 
 static int posixovl_open(const char *path, struct fuse_file_info *filp)
 {
-	int fd;
+	int fd, ret;
 
 	if (is_hcb(path))
 		return -ENOENT;
-	if (could_be_too_long(path))
-		return -ENAMETOOLONG;
 
 	setfsxid();
+	if ((filp->flags & O_ACCMODE) == O_WRONLY ||
+	    (filp->flags & O_ACCMODE) == O_RDWR)
+		if ((ret = hl_try_demote(path)) < 0)
+			return ret;
 	/*
 	 * no need to handle non-regular files -- kernel (S_ISBLK, S_IFCHR,
 	 * S_IFIFO, S_IFSOCK) and FUSE (S_IFLNK) do that for us.
@@ -1254,6 +1283,9 @@ static int posixovl_truncate(const char *path, off_t length)
 		return -ENOENT;
 
 	setfsxid();
+	if ((ret = hl_try_demote(path)) < 0)
+		return ret;
+
 	/*
 	 * There is no ftruncateat(), so need to use openat()+ftruncate() here.
 	 */
