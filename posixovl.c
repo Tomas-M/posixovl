@@ -415,8 +415,13 @@ static int hcb_init_follow(const char *hcb_path, mode_t mode, uid_t uid,
 	int fd, ret;
 
 	fd = openat(root_fd, at(hcb_path), O_RDONLY);
-	if (fd < 0)
-		return -errno;
+	if (fd < 0) {
+		if (errno == ENOENT)
+			return hcb_init(hcb_path, mode, -1, uid, gid,
+			       -1, NULL, 0);
+		else
+			return -errno;
+	}
 	if (lock_read(fd) < 0)
 		return -errno;
 	ret = hcb_read(hcb_path, &info, fd);
