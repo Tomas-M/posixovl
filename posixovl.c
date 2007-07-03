@@ -647,7 +647,8 @@ static int posixovl_getattr(const char *path, struct stat *sb)
 			sb->st_nlink = 0;
 			return -EIO;
 		}
-		sb->st_ino = sb2.st_ino;
+		sb->st_ino  = sb2.st_ino;
+		sb->st_size = sb2.st_size;
 	}
 
 	/*
