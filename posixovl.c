@@ -69,6 +69,7 @@
 	})
 
 /* Definitions */
+#define HCB_PREFIX1    ".pxovl"  /* extra vfat idiocy */
 #define HCB_PREFIX     ".pxovl."
 #define HCB_PREFIX_LEN (sizeof(HCB_PREFIX) - 1)
 #define HL_DNODE_PREFIX     ".pxovd."
@@ -463,7 +464,8 @@ static __attribute__((pure)) inline unsigned int is_hcb_name(const char *name)
 {
 	return strncmp(name, HCB_PREFIX, HCB_PREFIX_LEN) == 0 ||
 	       strncmp(name, HL_DNODE_PREFIX, HL_DNODE_PREFIX_LEN) == 0 ||
-	       strncmp(name, HL_INODE_PREFIX, HL_INODE_PREFIX_LEN) == 0;
+	       strncmp(name, HL_INODE_PREFIX, HL_INODE_PREFIX_LEN) == 0 ||
+	       strcmp(name, HCB_PREFIX1);
 }
 
 static __attribute__((pure)) inline unsigned int is_hcb(const char *path)
