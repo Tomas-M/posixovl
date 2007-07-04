@@ -185,7 +185,7 @@ static int __real_to_hcb(char *dest, size_t destsize, const char *src)
 #define real_to_hcb(dest, src) __real_to_hcb((dest), sizeof(dest), (src))
 
 /*
- * hcb_read -
+ * hcb_read - lowlevel read of HCB
  * @path:	path to HCB (used for debug and unlink)
  * @info:	destination structure
  * @fd:		fd to read from
@@ -242,12 +242,21 @@ static int hcb_read(const char *path, struct hcb *info, int fd)
 	return -EINVAL;
 }
 
+/*
+ * hcb_read - lowlevel write of HCB
+ * @path:	path to HCB (used for debug and unlink)
+ * @info:	source structure
+ * @fd:		fd to write to
+ *
+ * Recalculates @info->buf from the structure and writes it out.
+ */
 static int hcb_write(const char *path, struct hcb *info, int fd)
 {
 	size_t z;
 	int ret;
 
-	lseek(fd, 0, SEEK_SET);
+	if (lseek(fd, 0, SEEK_SET) < 0)
+		return -errno;
 	ftruncate(fd, 0);
 	ret = snprintf(info->buf, sizeof(info->buf), "%o %u %lu %lu %lu:%lu %s",
 	      static_cast(unsigned int, info->mode),
