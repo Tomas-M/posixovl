@@ -78,13 +78,13 @@
 #define HL_INODE_PREFIX_LEN (sizeof(HL_INODE_PREFIX) - 1)
 
 enum {
-	/* Flags for hcb_init() */
+	/* Flags for hcb_update() */
 	HCB_RETAIN_MODE  = -1,
 	HCB_RETAIN_NLINK = -1,
 	HCB_RETAIN_UID   = -1,
 	HCB_RETAIN_GID   = -1,
 	HCB_RETAIN_RDEV  = -1,
-	/* hardlink slaves do not have attributes */
+	/* Flags for hcb_create() - hardlink slaves do not have UID/GID/RDEV */
 	HCB_INV_UID      = -1,
 	HCB_INV_GID      = -1,
 	HCB_INV_RDEV     = -1,
@@ -178,7 +178,12 @@ static int __real_to_hcb(char *dest, size_t destsize, const char *src)
 	 */
 	ret = fstatat(root_fd, at(src), &sb, AT_SYMLINK_NOFOLLOW);
 	if (ret == 0 && S_ISDIR(sb.st_mode)) {
-		ret = snprintf(dest, destsize, "%s/" HCB_PREFIX, src);
+		if (strcmp(src, "/") == 0)
+			/* Make sure there is only one slash */
+			ret = snprintf(dest, destsize, "/" HCB_PREFIX);
+		else
+			ret = snprintf(dest, destsize, "%s/" HCB_PREFIX, src);
+
 		if (ret > destsize)
 			return -ENAMETOOLONG;
 		return 0;
@@ -350,7 +355,49 @@ static inline int hcb_lookup_4readdir(const char *dir, const char *name,
 }
 
 /*
- * hcb_init - Create or update HCB
+ * hcb_create - Create HCB
+ * @hcb_path:	path to the HCB
+ * @mode:	file mode and permissions
+ * @uid:	owning user
+ * @gid:	owning group
+ * @rdev:	device number for block and character devices
+ * @target:	target for soft and hardlinks (or %NULL for none)
+ */
+static int hcb_create(const char *hcb_path, mode_t mode, nlink_t nlink,
+    uid_t uid, gid_t gid, dev_t rdev, const char *target)
+{
+	struct hcb info;
+	int fd, ret;
+
+	fd = openat(root_fd, at(hcb_path), O_WRONLY | O_CREAT | O_EXCL,
+	     S_IRUGO | S_IWUSR);
+	if (fd < 0)
+		return -errno;
+	if (lock_write(fd) < 0) {
+		ret = -errno;
+		goto err;
+	}
+
+	info.mode  = mode;
+	info.nlink = 1;
+	info.uid   = uid;
+	info.gid   = gid;
+	info.rdev  = rdev;
+
+	if (target != NULL)
+		strncpy(info.tbuf, target, sizeof(info.tbuf));
+	else
+		*info.tbuf = '\0';
+	info.tbuf[sizeof(info.tbuf)-1] = '\0';
+
+	ret = hcb_write(hcb_path, &info, fd);
+ err:
+	close(fd);
+	return ret;
+}
+
+/*
+ * hcb_update - Update HCB
  * @hcb_path:	path to the HCB
  * @mode:	file mode and permissions (or HCB_RETAIN_MODE for no change)
  * @nlink:	nlink count (or HCB_RETAIN_NLINK for no change)
@@ -359,36 +406,22 @@ static inline int hcb_lookup_4readdir(const char *dir, const char *name,
  * @rdev:	device number for block and character devices
  *		(or HCB_RETAIN_RDEV for no change)
  * @target:	target for soft and hardlinks (or %NULL for no change)
- * @flags:	flags for openat(). May be 0 or %O_EXCL.
  */
-static int hcb_init(const char *hcb_path, mode_t mode, nlink_t nlink,
-    uid_t uid, gid_t gid, dev_t rdev, const char *target, unsigned int flags)
+static int hcb_update(const char *hcb_path, mode_t mode, nlink_t nlink,
+    uid_t uid, gid_t gid, dev_t rdev, const char *target)
 {
 	struct hcb info;
 	int fd, ret;
 
-	if (flags != 0 && flags != O_EXCL)
-		should_not_happen();
-
-	fd = openat(root_fd, at(hcb_path), O_RDWR | O_CREAT | flags,
-	     S_IRUGO | S_IWUSR);
+	fd = openat(root_fd, at(hcb_path), O_RDWR);
 	if (fd < 0)
 		return -errno;
-	if (lock_write(fd) < 0)
-		return -errno;
-	ret = hcb_read(hcb_path, &info, fd);
-	if (ret == -ENOENT) {
-		const struct fuse_context *ctx = fuse_get_context();
-		info.mode   = mode;
-		info.nlink  = 1;
-		info.uid    = ctx->uid;
-		info.gid    = ctx->gid;
-		info.rdev   = 0;
-		info.size   = 0;
-		info.target = NULL;
-	} else if (ret < 0) {
+	if (lock_write(fd) < 0) {
+		ret = -errno;
 		goto err;
 	}
+	if ((ret = hcb_read(hcb_path, &info, fd)) < 0)
+		goto err;
 
 	/* update */
 	if (mode != HCB_RETAIN_MODE)
@@ -416,48 +449,6 @@ static int hcb_init(const char *hcb_path, mode_t mode, nlink_t nlink,
  err:
 	close(fd);
 	return ret;
-}
-
-/*
- * hcb_init_follow - follow HCB to hardlink master and apply changes
- * @hcb_path:	path to HCB
- * @mode:	new permissions (or HCB_RETAIN_MODE for no change)
- * @uid:	new owning user (or HCB_RETAIN_UID for no change)
- * @gid:	new owning group (or HCB_RETAIN_GID for no change)
- *
- * hcb_init_follow() follows the HCB pointer in a S_IFHARDLNK and then applies
- * changes. @mode is enforced to NOT contain a file mode, only the
- * _permissions_ (and this is checked). Only callers hence are chown() and
- * chmod().
- */
-static int hcb_init_follow(const char *hcb_path, mode_t mode, uid_t uid,
-    gid_t gid)
-{
-	char hinode_path[PATH_MAX];
-	struct hcb info;
-	int fd, ret;
-
-	fd = openat(root_fd, at(hcb_path), O_RDONLY);
-	if (fd < 0) {
-		if (errno == ENOENT)
-			return hcb_init(hcb_path, mode, HCB_RETAIN_NLINK, uid,
-			       gid, HCB_RETAIN_RDEV, NULL, 0);
-		else
-			return -errno;
-	}
-	if (lock_read(fd) < 0)
-		return -errno;
-	ret = hcb_read(hcb_path, &info, fd);
-	close(fd);
-	if (ret < 0)
-		return ret;
-	if (S_ISHARDLNK(info.mode)) {
-		hl_dtoi(hinode_path, info.target);
-		return hcb_init(hinode_path, mode, HCB_RETAIN_NLINK, uid, gid,
-		       HCB_RETAIN_RDEV, NULL, 0);
-	}
-	return hcb_init(hcb_path, mode, HCB_RETAIN_NLINK, uid, gid,
-	       HCB_RETAIN_RDEV, NULL, 0);
 }
 
 static __attribute__((pure)) inline unsigned int is_hcb_name(const char *name)
@@ -543,30 +534,62 @@ static int posixovl_access(const char *path, int mode)
 	return generic_permission(&info, mode);
 }
 
-static int posixovl_chmod(const char *path, mode_t mode)
+static int hcb_update_or_create(const char *path, mode_t mode,
+    uid_t uid, gid_t gid)
 {
-	char hcb_path[PATH_MAX];
+	char hcb_path[PATH_MAX], hinode_path[PATH_MAX];
+	const struct fuse_context *ctx;
+	struct hcb info;
+	struct stat sb;
 	int ret;
 
+	if ((ret = real_to_hcb(hcb_path, path)) < 0)
+		return ret;
+
+	ret = hcb_lookup(hcb_path, &info, 0);
+	if (ret == -ENOENT) {
+		ret = fstatat(root_fd, at(path), &sb, AT_SYMLINK_NOFOLLOW);
+		if (ret < 0)
+			return -errno;
+
+		ctx = fuse_get_context();
+		if (mode == HCB_RETAIN_MODE)
+			mode = sb.st_mode;
+		if (uid == HCB_RETAIN_UID)
+			uid  = ctx->uid;
+		if (gid == HCB_RETAIN_GID)
+			gid  = ctx->gid;
+
+		return hcb_create(hcb_path, mode, 1, uid, gid,
+		       sb.st_rdev, NULL);
+	} else if (ret < 0) {
+		return ret;
+	}
+
+	if (S_ISHARDLNK(info.mode)) {
+		hl_dtoi(hinode_path, info.target);
+		return hcb_update(hinode_path, mode, HCB_RETAIN_NLINK,
+		       uid, gid, HCB_RETAIN_RDEV, NULL);
+	}
+
+	return hcb_update(hcb_path, mode, HCB_RETAIN_NLINK, uid, gid,
+	       HCB_RETAIN_RDEV, NULL);
+}
+
+static int posixovl_chmod(const char *path, mode_t mode)
+{
 	if (is_hcb(path))
 		return -ENOENT;
 	setfsxid();
-	if ((ret = real_to_hcb(hcb_path, path)) < 0)
-		return ret;
-	return hcb_init_follow(hcb_path, mode, HCB_RETAIN_UID, HCB_RETAIN_GID);
+	return hcb_update_or_create(path, mode, HCB_RETAIN_UID, HCB_RETAIN_GID);
 }
 
 static int posixovl_chown(const char *path, uid_t uid, gid_t gid)
 {
-	char hcb_path[PATH_MAX];
-	int ret;
-
 	if (is_hcb(path))
 		return -ENOENT;
 	setfsxid();
-	if ((ret = real_to_hcb(hcb_path, path)) < 0)
-		return ret;
-	return hcb_init_follow(hcb_path, HCB_RETAIN_MODE, uid, gid);
+	return hcb_update_or_create(path, HCB_RETAIN_MODE, uid, gid);
 }
 
 static int posixovl_close(const char *path, struct fuse_file_info *filp)
@@ -812,29 +835,28 @@ static int hl_promote(const char *path, const char *hcb_path,
 			ret = -errno;
 			goto out;
 		}
-		ret = hcb_init(hinode_path, HCB_RETAIN_MODE, 1, HCB_RETAIN_UID,
-		      HCB_RETAIN_GID, HCB_RETAIN_RDEV, NULL, 0);
+		/* nlink already ok */
 	} else {
 		mode_t mode = orig_sb.st_mode;
 
 		if (!S_ISDIR(orig_sb.st_mode) && !S_ISLNK(orig_sb.st_mode))
 			mode &= ~S_IXUGO;
 		/* initialize nlink counter */
-		ret = hcb_init(hinode_path, mode, 1, HCB_RETAIN_UID,
-		      HCB_RETAIN_GID, HCB_RETAIN_RDEV, NULL, O_EXCL);
+		ret = hcb_create(hinode_path, mode, 1, orig_sb.st_uid,
+		      orig_sb.st_gid, orig_sb.st_rdev, NULL);
 	}
 
 	if (ret < 0)
 		goto out2;
 
 	/* initialize first link */
-	ret = hcb_init(hcb_path, S_IFHARDLNK, HCB_RETAIN_NLINK, HCB_INV_UID,
-	      HCB_INV_GID, HCB_INV_RDEV, hdnode_path, O_EXCL);
+	ret = hcb_create(hcb_path, S_IFHARDLNK, 1, HCB_INV_UID, HCB_INV_GID,
+	      HCB_INV_RDEV, hdnode_path);
 	if (ret < 0)
 		goto out3;
 
 	/* instantiate first link into readdir visibility */
-	fd = openat(root_fd, at(path), O_CREAT | O_EXCL, 0);
+	fd = openat(root_fd, at(path), O_WRONLY | O_CREAT | O_EXCL, 0);
 	if (fd < 0) {
 		ret = -errno;
 		goto out4;
@@ -868,8 +890,8 @@ static int hl_up_nlink(const char *hdnode_path)
 	ret = hcb_lookup(hinode_path, &info, 0);
 	if (ret < 0)
 		return ret;
-	return hcb_init(hinode_path, HCB_RETAIN_MODE, info.nlink + 1,
-	       HCB_RETAIN_UID, HCB_RETAIN_GID, HCB_RETAIN_RDEV, NULL, 0);
+	return hcb_update(hinode_path, HCB_RETAIN_MODE, info.nlink + 1,
+	       HCB_RETAIN_UID, HCB_RETAIN_GID, HCB_RETAIN_RDEV, NULL);
 }
 
 /*
@@ -900,8 +922,8 @@ static int hl_drop(const char *hdnode_path)
 		return 0;
 	}
 
-	ret = hcb_init(hinode_path, HCB_RETAIN_MODE, info.nlink - 1,
-	      HCB_RETAIN_UID, HCB_RETAIN_GID, HCB_RETAIN_RDEV, NULL, 0);
+	ret = hcb_update(hinode_path, HCB_RETAIN_MODE, info.nlink - 1,
+	      HCB_RETAIN_UID, HCB_RETAIN_GID, HCB_RETAIN_RDEV, NULL);
 	pthread_mutex_unlock(&posixovl_protect);
 	return ret;
 }
@@ -951,16 +973,15 @@ static int hl_instantiate(const char *oldpath, const char *newpath)
 	if ((ret = hl_up_nlink(info.target)) < 0)
 		return ret;
 
-	ret = hcb_init(hcb_newpath, S_IFHARDLNK, HCB_RETAIN_NLINK,
-	      HCB_INV_UID, HCB_INV_GID, HCB_INV_RDEV, info.target, O_EXCL);
+	ret = hcb_create(hcb_newpath, S_IFHARDLNK, 1, HCB_INV_UID, HCB_INV_GID,
+	      HCB_INV_RDEV, info.target);
 	if (ret < 0)
 		goto out;
 
-	fd = openat(root_fd, at(newpath), O_CREAT | O_EXCL, 0);
+	fd = openat(root_fd, at(newpath), O_WRONLY | O_CREAT | O_EXCL, 0);
 	if (fd < 0) {
 		ret = -errno;
 		goto out2;
-		return ret;
 	}
 
 	close(fd);
@@ -1030,6 +1051,7 @@ static int posixovl_mkdir(const char *path, mode_t mode)
 
 static int posixovl_mknod(const char *path, mode_t mode, dev_t rdev)
 {
+	const struct fuse_context *ctx;
 	char hcb_path[PATH_MAX];
 	int fd, ret;
 
@@ -1050,9 +1072,9 @@ static int posixovl_mknod(const char *path, mode_t mode, dev_t rdev)
 	 * readdir() and is not accessible either.
 	 * Same goes for posixovl_symlink().
 	 */
+	ctx = fuse_get_context();
 	pthread_mutex_lock(&posixovl_protect);
-	ret = hcb_init(hcb_path, mode, HCB_RETAIN_NLINK, HCB_RETAIN_UID,
-	      HCB_RETAIN_GID, rdev, NULL, O_EXCL);
+	ret = hcb_create(hcb_path, mode, 1, ctx->uid, ctx->gid, rdev, NULL);
 	if (ret < 0) {
 		pthread_mutex_unlock(&posixovl_protect);
 		return ret;
@@ -1268,6 +1290,7 @@ static int posixovl_statfs(const char *path, struct statvfs *sb)
 
 static int posixovl_symlink(const char *oldpath, const char *newpath)
 {
+	const struct fuse_context *ctx;
 	char hcb_newpath[PATH_MAX];
 	int fd, ret;
 
@@ -1286,9 +1309,11 @@ static int posixovl_symlink(const char *oldpath, const char *newpath)
 		return ret;
 	if ((ret = real_to_hcb(hcb_newpath, newpath)) < 0)
 		return ret;
+
+	ctx = fuse_get_context();
 	pthread_mutex_lock(&posixovl_protect);
-	ret = hcb_init(hcb_newpath, S_IFSOFTLNK, HCB_RETAIN_NLINK,
-	      HCB_RETAIN_UID, HCB_RETAIN_GID, HCB_RETAIN_RDEV, oldpath, O_EXCL);
+	ret = hcb_create(hcb_newpath, S_IFSOFTLNK, 1, ctx->uid, ctx->gid,
+	      HCB_INV_RDEV, oldpath);
 	if (ret < 0) {
 		pthread_mutex_unlock(&posixovl_protect);
 		return ret;
@@ -1376,7 +1401,7 @@ static int posixovl_unlink(const char *path)
 	if (S_ISHARDLNK(info.mode))
 		hl_drop(info.target);
 
-	/* Can't help but to ignore unlink errors here */
+	/* Can't help but to ignore HCB/hardlink unlink errors here */
 	return 0;
 }
 
