@@ -1,0 +1,34 @@
+#!/bin/bash -e
+# if an operation fails, this script will stop
+
+echo -n "creating tmp files ... ";
+echo f1 >f1;
+echo f2 >f2;
+echo f3 >f3;
+echo "ok";
+
+echo -n "linking ... ";
+ln -sf f1 q1;
+ln -f f2 q2;
+echo "ok";
+
+echo -n "verifying linked data ... ";
+cat f1 | grep -q f1;
+cat f2 | grep -q f2;
+echo "ok";
+
+echo -n "changing ownerships and permissions ... ";
+chown 0:0 f1 f2 f3;
+chmod ago+x f1 f2 f3;
+chmod ago-x f1 f2 f3;
+echo "ok";
+
+echo -n "special device creation ... ";
+mknod null c 1 3;
+echo "ok";
+
+echo -n "cleanup ... ";
+rm f1 f2 f3 q1 q2 null;
+echo "ok";
+
+echo "ALL DONE";
