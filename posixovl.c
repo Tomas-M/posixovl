@@ -730,8 +730,11 @@ static int posixovl_getattr(const char *path, struct stat *sb)
 			sb->st_nlink = 0;
 			return -EIO;
 		}
-		sb->st_ino  = sb2.st_ino;
-		sb->st_size = sb2.st_size;
+		sb->st_ino   = sb2.st_ino;
+		sb->st_size  = sb2.st_size;
+		sb->st_atime = sb2.st_atime;
+		sb->st_ctime = sb2.st_ctime;
+		sb->st_mtime = sb2.st_mtime;
 	}
 
 	/*
@@ -1092,6 +1095,8 @@ static int posixovl_mknod(const char *path, mode_t mode, dev_t rdev)
 
 static int posixovl_open(const char *path, struct fuse_file_info *filp)
 {
+	char hcb_path[PATH_MAX];
+	struct hcb info;
 	int fd, ret;
 
 	if (is_hcb(path))
@@ -1102,11 +1107,24 @@ static int posixovl_open(const char *path, struct fuse_file_info *filp)
 	    (filp->flags & O_ACCMODE) == O_RDWR)
 		if ((ret = hl_try_demote(path)) < 0)
 			return ret;
-	/*
-	 * no need to handle non-regular files -- kernel (S_ISBLK, S_IFCHR,
-	 * S_IFIFO, S_IFSOCK) and FUSE (S_IFLNK) do that for us.
-	 */
-	if ((fd = openat(root_fd, at(path), filp->flags)) < 0)
+
+	if ((ret = real_to_hcb(hcb_path, path)) < 0)
+		return ret;
+
+	ret = hcb_lookup(hcb_path, &info, 0);
+	if (ret < 0 && ret != -ENOENT)
+		return ret;
+
+	if (ret == 0 && S_ISHARDLNK(info.mode))
+		fd = openat(root_fd, at(info.target), filp->flags);
+	else
+		/*
+		 * no need to handle non-regular files -- kernel and fuse do
+		 * that for us.
+		 */
+		fd = openat(root_fd, at(path), filp->flags);
+
+	if (fd < 0)
 		return -errno;
 
 	filp->fh = fd;
@@ -1342,19 +1360,27 @@ static int posixovl_truncate(const char *path, off_t length)
 	if ((ret = hl_try_demote(path)) < 0)
 		return ret;
 
+	if ((ret = real_to_hcb(hcb_path, path)) < 0)
+		return ret;
+	ret = hcb_lookup(hcb_path, &info, 0);
+	if (ret < 0 && ret != -ENOENT)
+		return ret;
+
 	/*
 	 * There is no ftruncateat(), so need to use openat()+ftruncate() here.
 	 */
-	fd = openat(root_fd, at(path), O_WRONLY);
+	if (ret == 0 && S_ISHARDLNK(info.mode))
+		fd = openat(root_fd, at(info.target), O_WRONLY);
+	else
+		fd = openat(root_fd, at(path), O_WRONLY);
+
 	if (fd < 0)
 		return -errno;
-	
-	if ((ret = real_to_hcb(hcb_path, path)) < 0)
-		return ret;
+
 	ret = hcb_lookup(hcb_path, &info, 1);
-	if (ret < 0 && ret != -ENOENT)
-		return ret;
-	else if (ret == 0 && !S_ISREG(info.mode) && !S_ISDIR(info.mode))
+	if (ret < 0)
+		return -errno;
+	if (ret == 0 && !S_ISREG(info.mode) && !S_ISDIR(info.mode))
 		/*
 		 * A HCB was found. But truncating special
 		 * files (e.g. /dev/zero) is invalid.
@@ -1407,7 +1433,9 @@ static int posixovl_unlink(const char *path)
 
 static int posixovl_utimens(const char *path, const struct timespec *ts)
 {
+	char hcb_path[PATH_MAX];
 	struct timeval tv;
+	struct hcb info;
 	int ret;
 
 	if (is_hcb(path))
@@ -1417,12 +1445,24 @@ static int posixovl_utimens(const char *path, const struct timespec *ts)
 	tv.tv_usec = ts->tv_nsec / 1000;
 
 	setfsxid();
+	if ((ret = real_to_hcb(hcb_path, path)) < 0)
+		return ret;
+	ret = hcb_lookup(hcb_path, &info, 0);
+	if (ret < 0 && ret != -ENOENT)
+		return ret;
+
 	/*
 	 * The time attributes are always applied to the plain file,
 	 * never the special file.
 	 * (Until a filesystem that cannot store times comes along.)
+	 * In case of S_IFHARDLNK, the .pxovd. file carries the stamp.
 	 */
-	ret = futimesat(root_fd, at(path), &tv);
+
+	if (ret == 0 && S_ISHARDLNK(info.mode))
+		ret = futimesat(root_fd, at(info.target), &tv);
+	else
+		ret = futimesat(root_fd, at(path), &tv);
+
 	XRET(ret);
 }
 

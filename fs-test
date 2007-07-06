@@ -1,6 +1,8 @@
 #!/bin/bash -e
 # if an operation fails, this script will stop
 
+trap "echo failed" EXIT;
+
 echo -n "creating tmp files ... ";
 echo f1 >f1;
 echo f2 >f2;
@@ -15,6 +17,11 @@ echo "ok";
 echo -n "verifying linked data ... ";
 cat f1 | grep -q f1;
 cat f2 | grep -q f2;
+echo "ok";
+
+echo -n "truncate ... ";
+>f2;
+[ ! -s f2 ];
 echo "ok";
 
 echo -n "changing ownerships and permissions ... ";
