@@ -17,6 +17,17 @@ AC_CHECK_HEADER(attr/xattr.h, [],
 		AC_MSG_ERROR([libattr-devel not installed]))
 AC_CHECK_HEADER(fuse.h, [],
 		AC_MSG_ERROR([fuse-devel not installed]))
+AC_MSG_CHECKING([for utimensat()])
+AC_COMPILE_IFELSE([
+		#include <asm/unistd.h>
+		static unsigned int x = __NR_utimensat;
+	], [
+		AC_DEFINE([HAVE_UTIMENSAT], [1],
+			[Define if utimensat() function is available])
+		AC_MSG_RESULT([yes])
+	], [
+		AC_MSG_RESULT([no])
+	])
 CFLAGS="$saved_CFLAGS"
 CPPFLAGS="$saved_CPPFLAGS"
 

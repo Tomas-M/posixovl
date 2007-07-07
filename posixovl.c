@@ -27,6 +27,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <asm/unistd.h>
+#include "config.h"
 #ifndef S_IRUGO
 #	define S_IRUGO (S_IRUSR | S_IRGRP | S_IROTH)
 #	define S_IWUGO (S_IWUSR | S_IWGRP | S_IWOTH)
@@ -1435,15 +1437,19 @@ static int posixovl_unlink(const char *path)
 static int posixovl_utimens(const char *path, const struct timespec *ts)
 {
 	char hcb_path[PATH_MAX];
-	struct timeval tv;
 	struct hcb info;
 	int ret;
+#ifndef HAVE_UTIMENSAT
+	struct timeval tv;
+#endif
 
 	if (is_hcb(path))
 		return -ENOENT;
 
+#ifndef HAVE_UTIMENSAT
 	tv.tv_sec  = ts->tv_sec;
 	tv.tv_usec = ts->tv_nsec / 1000;
+#endif
 
 	setfsxid();
 	if ((ret = real_to_hcb(hcb_path, path)) < 0)
@@ -1459,10 +1465,18 @@ static int posixovl_utimens(const char *path, const struct timespec *ts)
 	 * In case of S_IFHARDLNK, the .pxovd. file carries the stamp.
 	 */
 
+#ifndef HAVE_UTIMENSAT
 	if (ret == 0 && S_ISHARDLNK(info.mode))
 		ret = futimesat(root_fd, at(info.target), &tv);
 	else
 		ret = futimesat(root_fd, at(path), &tv);
+#else
+	if (ret == 0 && S_ISHARDLNK(info.mode))
+		ret = utimensat(root_fd, at(info.target),
+		      ts, AT_SYMLINK_NOFOLLOW);
+	else
+		ret = utimensat(root_fd, at(path), ts, AT_SYMLINK_NOFOLLOW);
+#endif
 
 	XRET(ret);
 }
