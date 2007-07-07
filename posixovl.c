@@ -647,13 +647,13 @@ static int hl_demote(const char *hdnode_path, const char *path,
 		return -errno;
 	}
 	unlinkat(root_fd, at(hcb_path), 0);
-	if (renameat(root_fd, at(hdnode_path), root_fd, at(path)) < 0) {
+	if (renameat(root_fd, at(hinode_path), root_fd, at(hcb_path)) < 0) {
 		pthread_mutex_unlock(&posixovl_protect);
 		ret = -errno;
 		fprintf(stderr, "Inconsistency (1) during hardlink demotion!\n");
 		return ret;
 	}
-	if (renameat(root_fd, at(hinode_path), root_fd, at(hcb_path)) < 0)
+	if (renameat(root_fd, at(hdnode_path), root_fd, at(path)) < 0)
 		fprintf(stderr, "Inconsistency (2) during hardlink demotion!\n");
 	pthread_mutex_unlock(&posixovl_protect);
 	return 0;
