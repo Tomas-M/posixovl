@@ -1,7 +1,8 @@
 /*
  *	posixovl - POSIX overlay filesystem
- *
  *	Copyright © Jan Engelhardt <jengelh@computergmbh.de>, 2007
+ *
+ *	Development of posixovl sponsored by Slax (http://www.slax.org/)
  *
  *	This program is free software; you can redistribute it and/or
  *	modify it under the terms of the GNU General Public License as
