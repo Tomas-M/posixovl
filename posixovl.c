@@ -317,8 +317,11 @@ static int hcb_lookup(const char *path, struct hcb *info, unsigned int follow)
 	fd = openat(root_fd, at(path), O_RDONLY);
 	if (fd < 0)
 		return -errno;
-	if (lock_read(fd) < 0)
-		return -errno;
+	if (lock_read(fd) < 0) {
+		ret = -errno;
+		close(fd);
+		return ret;
+	}
 	ret = hcb_read(path, info, fd);
 	close(fd);
 	if (ret < 0)
