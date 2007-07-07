@@ -634,6 +634,16 @@ static int posixovl_ftruncate(const char *path, off_t length,
 	XRET(ftruncate(filp->fh, length));
 }
 
+/*
+ * hl_demote - collapse S_IFHARDLNK into normal file
+ * @hdnode_path:
+ * @path:
+ * @hcb_path:
+ *
+ * Unlink the L0 files and move the L1 ones into L0's place.
+ * It *must* be guaranteed that L1 has nlink=1, or all other
+ * hardlink slaves break.
+ */
 static int hl_demote(const char *hdnode_path, const char *path,
     const char *hcb_path)
 {
@@ -663,6 +673,14 @@ static int hl_demote(const char *hdnode_path, const char *path,
 	return ret;
 }
 
+/*
+ * hl_try_demote - try to collapse a one-link hardlink net into one file
+ * @path:	real path
+ *
+ * Check if @path is a S_IFHARDLNK and if its link count is 1, demote the
+ * four-file set (virtual file, L0 HCB, data file, L1 HCB) into a two-file
+ * set (virtual + HCB).
+ */
 static int hl_try_demote(const char *path)
 {
 	char hcb_path[PATH_MAX], hinode_path[PATH_MAX];
