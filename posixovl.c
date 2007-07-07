@@ -94,7 +94,7 @@ enum {
 };
 
 struct hcb {
-	char buf[PATH_MAX], tbuf[PATH_MAX];
+	char buf[PATH_MAX], new_target[PATH_MAX];
 	const char *target;
 	mode_t mode;
 	nlink_t nlink;
@@ -285,7 +285,8 @@ static int hcb_write(const char *path, struct hcb *info, int fd)
 	      static_cast(unsigned int, info->nlink),
 	      static_cast(unsigned long, info->uid),
 	      static_cast(unsigned long, info->gid),
-	      COMPAT_MAJOR(info->rdev), COMPAT_MINOR(info->rdev), info->tbuf);
+	      COMPAT_MAJOR(info->rdev), COMPAT_MINOR(info->rdev),
+	      info->new_target);
 	if (ret >= sizeof(info->buf))
 		return -EIO;
 
@@ -388,10 +389,10 @@ static int hcb_create(const char *hcb_path, mode_t mode, nlink_t nlink,
 	info.rdev  = rdev;
 
 	if (target != NULL)
-		strncpy(info.tbuf, target, sizeof(info.tbuf));
+		strncpy(info.new_target, target, sizeof(info.new_target));
 	else
-		*info.tbuf = '\0';
-	info.tbuf[sizeof(info.tbuf)-1] = '\0';
+		*info.new_target = '\0';
+	info.new_target[sizeof(info.new_target)-1] = '\0';
 
 	ret = hcb_write(hcb_path, &info, fd);
  err:
@@ -439,13 +440,12 @@ static int hcb_update(const char *hcb_path, mode_t mode, nlink_t nlink,
 		info.rdev = rdev;
 
 	if (target != NULL)
-		strncpy(info.tbuf, target, sizeof(info.tbuf));
+		strncpy(info.new_target, target, sizeof(info.new_target));
 	else if (info.target != NULL)
-		/* move symlink target out of the way (from buf into tbuf) */
-		strncpy(info.tbuf, info.target, sizeof(info.tbuf));
+		strncpy(info.new_target, info.target, sizeof(info.new_target));
 	else
-		*info.tbuf = '\0';
-	info.tbuf[sizeof(info.tbuf)-1] = '\0';
+		*info.new_target = '\0';
+	info.new_target[sizeof(info.new_target)-1] = '\0';
 
 	/* write out */
 	ret = hcb_write(hcb_path, &info, fd);
