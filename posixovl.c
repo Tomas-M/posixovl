@@ -454,7 +454,7 @@ static int hcb_update(const char *hcb_path, mode_t mode, nlink_t nlink,
 	return ret;
 }
 
-static __attribute__((pure)) inline unsigned int is_hcb_name(const char *name)
+static __attribute__((pure)) inline unsigned int is_resv_name(const char *name)
 {
 	return strncmp(name, HCB_PREFIX, HCB_PREFIX_LEN) == 0 ||
 	       strncmp(name, HL_DNODE_PREFIX, HL_DNODE_PREFIX_LEN) == 0 ||
@@ -462,12 +462,12 @@ static __attribute__((pure)) inline unsigned int is_hcb_name(const char *name)
 	       strcmp(name, HCB_PREFIX1) == 0;
 }
 
-static __attribute__((pure)) inline unsigned int is_hcb(const char *path)
+static __attribute__((pure)) inline unsigned int is_resv(const char *path)
 {
 	const char *file = strrchr(path, '/');
 	if (file++ == NULL)
 		should_not_happen();
-	return is_hcb_name(file);
+	return is_resv_name(file);
 }
 
 static int generic_permission(const struct hcb *info, unsigned int mask)
@@ -520,7 +520,7 @@ static int posixovl_access(const char *path, int mode)
 	struct hcb info;
 	int ret;
 
-	if (is_hcb(path))
+	if (is_resv(path))
 		return -ENOENT;
 	setrexid();
 	if ((ret = real_to_hcb(hcb_path, path)) < 0)
@@ -581,7 +581,7 @@ static int hcb_update_or_create(const char *path, mode_t mode,
 
 static int posixovl_chmod(const char *path, mode_t mode)
 {
-	if (is_hcb(path))
+	if (is_resv(path))
 		return -ENOENT;
 	setfsxid();
 	return hcb_update_or_create(path, mode, HCB_RETAIN_UID, HCB_RETAIN_GID);
@@ -589,7 +589,7 @@ static int posixovl_chmod(const char *path, mode_t mode)
 
 static int posixovl_chown(const char *path, uid_t uid, gid_t gid)
 {
-	if (is_hcb(path))
+	if (is_resv(path))
 		return -ENOENT;
 	setfsxid();
 	return hcb_update_or_create(path, HCB_RETAIN_MODE, uid, gid);
@@ -613,7 +613,7 @@ static int posixovl_create(const char *path, mode_t mode,
 {
 	int fd;
 
-	if (is_hcb(path))
+	if (is_resv(path))
 		return -EPERM;
 	if (could_be_too_long(path))
 		return -ENAMETOOLONG;
@@ -698,7 +698,7 @@ static int posixovl_getattr(const char *path, struct stat *sb)
 	char hcb_path[PATH_MAX];
 	int ret;
 
-	if (is_hcb(path))
+	if (is_resv(path))
 		return -ENOENT;
 
 	setfsxid();
@@ -1010,9 +1010,9 @@ static int posixovl_link(const char *oldpath, const char *newpath)
 	struct stat sb;
 	int ret;
 
-	if (is_hcb(oldpath))
+	if (is_resv(oldpath))
 		return -ENOENT;
-	if (is_hcb(newpath))
+	if (is_resv(newpath))
 		return -EPERM;
 	if (could_be_too_long(oldpath) || could_be_too_long(newpath))
 		return -ENAMETOOLONG;
@@ -1050,7 +1050,7 @@ static int posixovl_lock(const char *path, struct fuse_file_info *filp,
 
 static int posixovl_mkdir(const char *path, mode_t mode)
 {
-	if (is_hcb(path))
+	if (is_resv(path))
 		return -EPERM;
 	if (could_be_too_long(path))
 		return -ENAMETOOLONG;
@@ -1065,7 +1065,7 @@ static int posixovl_mknod(const char *path, mode_t mode, dev_t rdev)
 	char hcb_path[PATH_MAX];
 	int fd, ret;
 
-	if (is_hcb(path))
+	if (is_resv(path))
 		return -EPERM;
 
 	setfsxid();
@@ -1106,7 +1106,7 @@ static int posixovl_open(const char *path, struct fuse_file_info *filp)
 	struct hcb info;
 	int fd, ret;
 
-	if (is_hcb(path))
+	if (is_resv(path))
 		return -ENOENT;
 
 	setfsxid();
@@ -1154,7 +1154,7 @@ static int posixovl_readdir(const char *path, void *buffer,
 	int ret = 0;
 	DIR *ptr;
 
-	if (is_hcb(path))
+	if (is_resv(path))
 		return -ENOENT;
 	if (could_be_too_long(path))
 		return -ENAMETOOLONG;
@@ -1168,7 +1168,7 @@ static int posixovl_readdir(const char *path, void *buffer,
 
 	memset(&sb, 0, sizeof(sb));
 	while ((dentry = readdir(ptr)) != NULL) {
-		if (is_hcb_name(dentry->d_name))
+		if (is_resv_name(dentry->d_name))
 			continue;
 
 		sb.st_ino  = dentry->d_ino;
@@ -1199,7 +1199,7 @@ static int posixovl_readlink(const char *path, char *dest, size_t size)
 	char hcb_path[PATH_MAX];
 	int ret;
 
-	if (is_hcb(path))
+	if (is_resv(path))
 		return -ENOENT;
 
 	setfsxid();
@@ -1229,9 +1229,9 @@ static int posixovl_rename(const char *oldpath, const char *newpath)
 	struct stat sb;
 	int ret, ret_2;
 
-	if (is_hcb(oldpath))
+	if (is_resv(oldpath))
 		return -ENOENT;
-	if (is_hcb(newpath))
+	if (is_resv(newpath))
 		return -EPERM;
 	if (could_be_too_long(oldpath) || could_be_too_long(newpath))
 		return -ENAMETOOLONG;
@@ -1294,7 +1294,7 @@ static int posixovl_rmdir(const char *path)
 	char hcb_path[PATH_MAX];
 	int ret;
 
-	if (is_hcb(path))
+	if (is_resv(path))
 		return -ENOENT;
 	if ((ret = real_to_hcb(hcb_path, path)) < 0)
 		return ret;
@@ -1319,7 +1319,7 @@ static int posixovl_symlink(const char *oldpath, const char *newpath)
 	char hcb_newpath[PATH_MAX];
 	int fd, ret;
 
-	if (is_hcb(newpath))
+	if (is_resv(newpath))
 		return -EPERM;
 
 	setfsxid();
@@ -1360,7 +1360,7 @@ static int posixovl_truncate(const char *path, off_t length)
 	struct hcb info;
 	int fd, ret;
 
-	if (is_hcb(path))
+	if (is_resv(path))
 		return -ENOENT;
 
 	setfsxid();
@@ -1409,7 +1409,7 @@ static int posixovl_unlink(const char *path)
 	struct hcb info;
 	int ret;
 
-	if (is_hcb(path))
+	if (is_resv(path))
 		return -ENOENT;
 	if ((ret = real_to_hcb(hcb_path, path)) < 0)
 		return ret;
@@ -1447,7 +1447,7 @@ static int posixovl_utimens(const char *path, const struct timespec *ts)
 	struct timeval tv;
 #endif
 
-	if (is_hcb(path))
+	if (is_resv(path))
 		return -ENOENT;
 
 #ifndef HAVE_UTIMENSAT
