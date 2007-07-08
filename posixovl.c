@@ -93,7 +93,7 @@ enum {
 	HCB_INV_RDEV     = -1,
 };
 
-struct hcb {
+struct ll_hcb {
 	char buf[PATH_MAX], new_target[PATH_MAX];
 	const char *target;
 	mode_t mode;
@@ -212,7 +212,7 @@ static int __real_to_hcb(char *dest, size_t destsize, const char *src)
  * @info:	destination structure
  * @fd:		fd to read from
  */
-static int hcb_read(const char *path, struct hcb *info, int fd)
+static int hcb_read(const char *path, struct ll_hcb *info, int fd)
 {
 	const char *s_mode, *s_nlink, *s_uid, *s_gid, *s_rdev;
 	char *toul_ptr = NULL;
@@ -272,7 +272,7 @@ static int hcb_read(const char *path, struct hcb *info, int fd)
  *
  * Recalculates @info->buf from the structure and writes it out.
  */
-static int hcb_write(const char *path, struct hcb *info, int fd)
+static int hcb_write(const char *path, struct ll_hcb *info, int fd)
 {
 	size_t z;
 	int ret;
@@ -309,7 +309,8 @@ static int hcb_write(const char *path, struct hcb *info, int fd)
  * @info:	destination buffer
  * @follow:	follow S_IFHARDLNK objects
  */
-static int hcb_lookup(const char *path, struct hcb *info, unsigned int follow)
+static int hcb_lookup(const char *path, struct ll_hcb *info,
+    unsigned int follow)
 {
 	char hinode_path[PATH_MAX];
 	int fd, ret;
@@ -348,7 +349,7 @@ static int hcb_lookup(const char *path, struct hcb *info, unsigned int follow)
  * transforms it into the HCB filename, then calls hcb_lookup().
  */
 static inline int hcb_lookup_4readdir(const char *dir, const char *name,
-    struct hcb *info)
+    struct ll_hcb *info)
 {
 	char path[PATH_MAX], hcb_path[PATH_MAX];
 	int ret;
@@ -373,7 +374,7 @@ static inline int hcb_lookup_4readdir(const char *dir, const char *name,
 static int hcb_create(const char *hcb_path, mode_t mode, nlink_t nlink,
     uid_t uid, gid_t gid, dev_t rdev, const char *target)
 {
-	struct hcb info;
+	struct ll_hcb info;
 	int fd, ret;
 
 	fd = openat(root_fd, at(hcb_path), O_WRONLY | O_CREAT | O_EXCL,
@@ -417,7 +418,7 @@ static int hcb_create(const char *hcb_path, mode_t mode, nlink_t nlink,
 static int hcb_update(const char *hcb_path, mode_t mode, nlink_t nlink,
     uid_t uid, gid_t gid, dev_t rdev, const char *target)
 {
-	struct hcb info;
+	struct ll_hcb info;
 	int fd, ret;
 
 	fd = openat(root_fd, at(hcb_path), O_RDWR);
@@ -473,7 +474,7 @@ static __attribute__((pure)) inline unsigned int is_resv(const char *path)
 	return is_resv_name(file);
 }
 
-static int generic_permission(const struct hcb *info, unsigned int mask)
+static int generic_permission(const struct ll_hcb *info, unsigned int mask)
 {
 	const struct fuse_context *ctx = fuse_get_context();
 	mode_t mode = info->mode;
@@ -520,7 +521,7 @@ static inline void setrexid(void)
 static int posixovl_access(const char *path, int mode)
 {
 	char hcb_path[PATH_MAX];
-	struct hcb info;
+	struct ll_hcb info;
 	int ret;
 
 	if (is_resv(path))
@@ -545,7 +546,7 @@ static int hcb_update_or_create(const char *path, mode_t mode,
 {
 	char hcb_path[PATH_MAX], hinode_path[PATH_MAX];
 	const struct fuse_context *ctx;
-	struct hcb info;
+	struct ll_hcb info;
 	struct stat sb;
 	int ret;
 
@@ -687,7 +688,7 @@ static int hl_demote(const char *hdnode_path, const char *path,
 static int hl_try_demote(const char *path)
 {
 	char hcb_path[PATH_MAX], hinode_path[PATH_MAX];
-	struct hcb info_first, info_last;
+	struct ll_hcb info_first, info_last;
 	int ret;
 
 	if ((ret = real_to_hcb(hcb_path, path)) < 0)
@@ -715,7 +716,7 @@ static int hl_try_demote(const char *path)
 
 static int posixovl_getattr(const char *path, struct stat *sb)
 {
-	struct hcb info_first, info_last;
+	struct ll_hcb info_first, info_last;
 	char hcb_path[PATH_MAX];
 	int ret;
 
@@ -820,7 +821,7 @@ static void *posixovl_init(struct fuse_conn_info *conn)
  * @info:	HCB data (or %NULL)
  */
 static int hl_promote(const char *path, const char *hcb_path,
-    const struct hcb *info)
+    const struct ll_hcb *info)
 {
 	char hdnode_path[PATH_MAX], hinode_path[PATH_MAX];
 	struct stat orig_sb, work_sb;
@@ -911,7 +912,7 @@ static int hl_promote(const char *path, const char *hcb_path,
 static int hl_up_nlink(const char *hdnode_path)
 {
 	char hinode_path[PATH_MAX];
-	struct hcb info;
+	struct ll_hcb info;
 	int ret;
 
 	hl_dtoi(hinode_path, hdnode_path);
@@ -932,7 +933,7 @@ static int hl_up_nlink(const char *hdnode_path)
 static int hl_drop(const char *hdnode_path)
 {
 	char hinode_path[PATH_MAX];
-	struct hcb info;
+	struct ll_hcb info;
 	int ret;
 
 	hl_dtoi(hinode_path, hdnode_path);
@@ -967,7 +968,7 @@ static int hl_drop(const char *hdnode_path)
 static int hl_instantiate(const char *oldpath, const char *newpath)
 {
 	char hcb_oldpath[PATH_MAX], hcb_newpath[PATH_MAX];
-	struct hcb info;
+	struct ll_hcb info;
 	int fd, ret;
 
 	if ((ret = real_to_hcb(hcb_oldpath, oldpath)) < 0)
@@ -1121,7 +1122,7 @@ static int posixovl_mknod(const char *path, mode_t mode, dev_t rdev)
 static int posixovl_open(const char *path, struct fuse_file_info *filp)
 {
 	char hcb_path[PATH_MAX];
-	struct hcb info;
+	struct ll_hcb info;
 	int fd, ret;
 
 	if (is_resv(path))
@@ -1167,7 +1168,7 @@ static int posixovl_readdir(const char *path, void *buffer,
     fuse_fill_dir_t filldir, off_t offset, struct fuse_file_info *filp)
 {
 	const struct dirent *dentry;
-	struct hcb info;
+	struct ll_hcb info;
 	struct stat sb;
 	int ret = 0;
 	DIR *ptr;
@@ -1213,7 +1214,7 @@ static int posixovl_readdir(const char *path, void *buffer,
 
 static int posixovl_readlink(const char *path, char *dest, size_t size)
 {
-	struct hcb info;
+	struct ll_hcb info;
 	char hcb_path[PATH_MAX];
 	int ret;
 
@@ -1244,7 +1245,7 @@ static int posixovl_readlink(const char *path, char *dest, size_t size)
 static int posixovl_rename(const char *oldpath, const char *newpath)
 {
 	char hcb_oldpath[PATH_MAX], hcb_newpath[PATH_MAX];
-	struct hcb info;
+	struct ll_hcb info;
 	struct stat sb;
 	int ret, ret_2;
 
@@ -1375,7 +1376,7 @@ static int posixovl_symlink(const char *oldpath, const char *newpath)
 static int posixovl_truncate(const char *path, off_t length)
 {
 	char hcb_path[PATH_MAX];
-	struct hcb info;
+	struct ll_hcb info;
 	int fd, ret;
 
 	if (is_resv(path))
@@ -1424,7 +1425,7 @@ static int posixovl_truncate(const char *path, off_t length)
 static int posixovl_unlink(const char *path)
 {
 	char hcb_path[PATH_MAX];
-	struct hcb info;
+	struct ll_hcb info;
 	int ret;
 
 	if (is_resv(path))
@@ -1459,7 +1460,7 @@ static int posixovl_unlink(const char *path)
 static int posixovl_utimens(const char *path, const struct timespec *ts)
 {
 	char hcb_path[PATH_MAX];
-	struct hcb info;
+	struct ll_hcb info;
 	int ret;
 #ifndef HAVE_UTIMENSAT
 	struct timeval tv;
