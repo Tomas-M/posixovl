@@ -105,6 +105,7 @@ struct hcb {
 
 /* Global */
 static const char *root_dir;
+static uid_t root_uid;
 static int root_fd;
 static unsigned int perform_setfsxid;
 static pthread_mutex_t posixovl_protect = PTHREAD_MUTEX_INITIALIZER;
@@ -679,19 +680,31 @@ unsigned int could_be_too_long(const char *path)
 static int posixovl_create(const char *path, mode_t mode,
     struct fuse_file_info *filp)
 {
-	int fd;
+	const struct fuse_context *ctx;
+	struct hcb cb;
+	int fd, ret;
 
 	if (is_resv(path))
 		return -EPERM;
 	if (could_be_too_long(path))
 		return -ENAMETOOLONG;
 
-	setfsxid();
-	fd = openat(root_fd, at(path), filp->flags, mode);
+	ctx = setfsxid();
+	fd  = openat(root_fd, at(path), filp->flags, mode);
 	if (fd < 0)
 		return -errno;
 
 	filp->fh = fd;
+
+	if (ctx->uid != root_uid) {
+		/* Ignore errors */
+		if ((ret = hcb_new(path, &cb, 0)) < 0)
+			return 0;
+		cb.ll.uid = ctx->uid;
+		cb.ll.gid = ctx->gid;
+		hcb_update(&cb);
+	}
+
 	return 0;
 }
 
@@ -1481,6 +1494,7 @@ int main(int argc, char **argv)
 {
 	char **aptr, **new_argv;
 	int new_argc = 0;
+	struct stat sb;
 
 	if (argc < 2) {
 		fprintf(stderr, "Usage: %s [/source_dir] /target_dir [fuseopts]\n", *argv);
@@ -1493,6 +1507,13 @@ int main(int argc, char **argv)
 		        root_dir, strerror(errno));
 		abort();
 	}
+
+	if (fstat(root_fd, &sb) < 0) {
+		perror("fstat");
+		abort();
+	}
+
+	root_uid = sb.st_uid;
 
 	new_argv = malloc(sizeof(char *) * (argc + 4));
 	new_argv[new_argc++] = argv[0];
