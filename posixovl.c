@@ -793,7 +793,7 @@ static int posixovl_getattr(const char *path, struct stat *sb)
 		return -ENOENT;
 	setfsxid();
 	ret = hcb_lookup_deref(path, &info);
-	if (ret < 0 && ret != -ENOENT_HCB)
+	if (ret < 0 && ret != -ENOENT_HCB && ret != -EACCES)
 		return ret;
 	memcpy(sb, &info.sb, sizeof(*sb));
 	return 0;
