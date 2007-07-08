@@ -692,6 +692,36 @@ unsigned int could_be_too_long(const char *path)
 	       1 + HCB_PREFIX_LEN >= PATH_MAX;
 }
 
+/*
+ * supports_permissions - check whether @path can do that
+ * @path:	path to check
+ * @mode:	mode that the file should have
+ *
+ * This has to be looked up on a per-path basis, because it is possible to
+ * mount a filesystem supporting permissions (e.g. XFS) on a directory on a
+ * filesystem that does not.
+ * 	mount -t vfat /dev/foo /mnt
+ * 	mount -t xfs  /dev/bar /mnt/sub
+ */
+static unsigned int supports_permissions(const char *path, mode_t mode)
+{
+	/* Pick some magic */
+	mode_t work_mode = (mode ^ S_IRUSR ^ S_IXGRP) & ~S_IROTH;
+	struct stat sb;
+
+//	if (fchmodat(root_fd, at(path), work_mode, AT_SYMLINK_NOFOLLOW) < 0)
+	if (chmod(at(path), work_mode) < 0)
+		return 0;
+	if (fstatat(root_fd, at(path), &sb, AT_SYMLINK_NOFOLLOW) < 0)
+		/* literally BUG() */
+		perror("fstatat");
+	if (sb.st_mode != work_mode)
+		return 0;
+//	fchmodat(root_fd, at(path), mode, AT_SYMLINK_NOFOLLOW);
+	chmod(at(path), mode);
+	return 1;
+}
+
 static int posixovl_create(const char *path, mode_t mode,
     struct fuse_file_info *filp)
 {
@@ -711,12 +741,12 @@ static int posixovl_create(const char *path, mode_t mode,
 
 	filp->fh = fd;
 
-	if (ctx->uid != root_uid) {
-		/* Ignore errors */
+	if (ctx->uid != root_uid || !supports_permissions(path, mode)) {
 		if ((ret = hcb_new(path, &cb, 0)) < 0)
 			return 0;
-		cb.ll.uid = ctx->uid;
-		cb.ll.gid = ctx->gid;
+		cb.ll.mode = mode;
+		cb.ll.uid  = ctx->uid;
+		cb.ll.gid  = ctx->gid;
 		hcb_update(&cb);
 	}
 
