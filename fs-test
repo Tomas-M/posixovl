@@ -3,6 +3,21 @@
 
 trap "echo failed" EXIT;
 
+echo -n "mass links (trigger fuse cache artifact) ... ";
+echo hello world >w0;
+ln w0 w1;
+ln w1 w2;
+ln w1 w3;
+ln w1 w4;
+ln w1 w5;
+ln w1 w6;
+ln w5 w7;
+ln w5 w8;
+ls -li;
+usleep 600000;
+ls -li;
+rm -f w[012345678];
+
 echo -n "creating tmp files ... ";
 echo f1 >f1;
 echo f2 >f2;
