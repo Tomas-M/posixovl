@@ -144,6 +144,13 @@ static __attribute__((pure)) const char *at(const char *in)
 	return in + 1;
 }
 
+static inline char *strlcpy(char *dest, const char *src, size_t n)
+{
+	strncpy(dest, src, n);
+	dest[n-1] = '\0';
+	return dest;
+}
+
 /*
  * __hl_dtoi - build the HL.I-node path from the HL.D-node path
  */
@@ -151,9 +158,7 @@ static void __hl_dtoi(char *dest, size_t destsize, const char *src)
 {
 	char *last, *p;
 
-	strncpy(dest, src, destsize);
-	dest[destsize-1] = '\0';
-
+	strlcpy(dest, src, destsize);
 	last = dest;
 	while ((p = strstr(last, "/" HL_DNODE_PREFIX)) != NULL)
 		last = p + 1;
@@ -207,12 +212,12 @@ static int __real_to_hcb(char *dest, size_t destsize, const char *src)
 #define real_to_hcb(dest, src) __real_to_hcb((dest), sizeof(dest), (src))
 
 /*
- * hcb_read - lowlevel read of HCB
+ * ll_hcb_read - lowlevel read of HCB
  * @path:	path to HCB (used for debug and unlink)
  * @info:	destination structure
  * @fd:		fd to read from
  */
-static int hcb_read(const char *path, struct ll_hcb *info, int fd)
+static int ll_hcb_read(const char *path, struct ll_hcb *info, int fd)
 {
 	const char *s_mode, *s_nlink, *s_uid, *s_gid, *s_rdev;
 	char *toul_ptr = NULL;
@@ -265,14 +270,14 @@ static int hcb_read(const char *path, struct ll_hcb *info, int fd)
 }
 
 /*
- * hcb_read - lowlevel write of HCB
+ * ll_hcb_write - lowlevel write of HCB
  * @path:	path to HCB (used for debug and unlink)
  * @info:	source structure
  * @fd:		fd to write to
  *
  * Recalculates @info->buf from the structure and writes it out.
  */
-static int hcb_write(const char *path, struct ll_hcb *info, int fd)
+static int ll_hcb_write(const char *path, struct ll_hcb *info, int fd)
 {
 	size_t z;
 	int ret;
@@ -323,7 +328,7 @@ static int hcb_lookup(const char *path, struct ll_hcb *info,
 		close(fd);
 		return ret;
 	}
-	ret = hcb_read(path, info, fd);
+	ret = ll_hcb_read(path, info, fd);
 	close(fd);
 	if (ret < 0)
 		return ret;
@@ -393,12 +398,11 @@ static int hcb_create(const char *hcb_path, mode_t mode, nlink_t nlink,
 	info.rdev  = rdev;
 
 	if (target != NULL)
-		strncpy(info.new_target, target, sizeof(info.new_target));
+		strlcpy(info.new_target, target, sizeof(info.new_target));
 	else
 		*info.new_target = '\0';
-	info.new_target[sizeof(info.new_target)-1] = '\0';
 
-	ret = hcb_write(hcb_path, &info, fd);
+	ret = ll_hcb_write(hcb_path, &info, fd);
  err:
 	close(fd);
 	return ret;
@@ -428,7 +432,7 @@ static int hcb_update(const char *hcb_path, mode_t mode, nlink_t nlink,
 		ret = -errno;
 		goto err;
 	}
-	if ((ret = hcb_read(hcb_path, &info, fd)) < 0)
+	if ((ret = ll_hcb_read(hcb_path, &info, fd)) < 0)
 		goto err;
 
 	/* update */
@@ -444,15 +448,14 @@ static int hcb_update(const char *hcb_path, mode_t mode, nlink_t nlink,
 		info.rdev = rdev;
 
 	if (target != NULL)
-		strncpy(info.new_target, target, sizeof(info.new_target));
+		strlcpy(info.new_target, target, sizeof(info.new_target));
 	else if (info.target != NULL)
-		strncpy(info.new_target, info.target, sizeof(info.new_target));
+		strlcpy(info.new_target, info.target, sizeof(info.new_target));
 	else
 		*info.new_target = '\0';
-	info.new_target[sizeof(info.new_target)-1] = '\0';
 
 	/* write out */
-	ret = hcb_write(hcb_path, &info, fd);
+	ret = ll_hcb_write(hcb_path, &info, fd);
  err:
 	close(fd);
 	return ret;
@@ -1237,8 +1240,7 @@ static int posixovl_readlink(const char *path, char *dest, size_t size)
 		return -EINVAL; /* not a symbolic link */
 
 	memset(dest, 0, size);
-	strncpy(dest, info.target, size - 1);
-	dest[size-1] = '\0';
+	strlcpy(dest, info.target, size);
 	return 0;
 }
 
