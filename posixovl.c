@@ -1237,6 +1237,7 @@ static int posixovl_readlink(const char *path, char *dest, size_t size)
 
 	memset(dest, 0, size);
 	strncpy(dest, info.target, size - 1);
+	dest[size-1] = '\0';
 	return 0;
 }
 
