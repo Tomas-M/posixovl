@@ -1406,14 +1406,19 @@ static int posixovl_truncate(const char *path, off_t length)
 		return -errno;
 
 	ret = hcb_lookup(hcb_path, &info, 1);
-	if (ret < 0)
-		return -errno;
-	if (ret == 0 && !S_ISREG(info.mode) && !S_ISDIR(info.mode))
+	if (ret < 0) {
+		ret = -errno;
+		close(fd);
+		return ret;
+	}
+	if (ret == 0 && !S_ISREG(info.mode) && !S_ISDIR(info.mode)) {
 		/*
 		 * A HCB was found. But truncating special
 		 * files (e.g. /dev/zero) is invalid.
 		 */
+		close(fd);
 		return -EINVAL;
+	}
 
 	/* Will return -EISDIR for us if it is a directory. */
 	ret = ftruncate(fd, length);
