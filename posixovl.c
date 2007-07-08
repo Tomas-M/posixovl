@@ -896,6 +896,7 @@ static int hl_promote(const char *path, const char *hcb_path,
 		goto out3;
 	}
 
+	close(fd);
 	return 0;
 
  out3:
