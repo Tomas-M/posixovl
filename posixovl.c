@@ -875,30 +875,27 @@ static int hl_promote(const char *path, const char *hcb_path,
 		/* initialize nlink counter */
 		ret = hcb_create(hinode_path, mode, 1, orig_sb.st_uid,
 		      orig_sb.st_gid, orig_sb.st_rdev, NULL);
+		if (ret < 0)
+			goto out;
 	}
-
-	if (ret < 0)
-		goto out2;
 
 	/* initialize first link */
 	ret = hcb_create(hcb_path, S_IFHARDLNK, 1, HCB_INV_UID, HCB_INV_GID,
 	      HCB_INV_RDEV, hdnode_path);
 	if (ret < 0)
-		goto out3;
+		goto out2;
 
 	/* instantiate first link into readdir visibility */
 	fd = openat(root_fd, at(path), O_WRONLY | O_CREAT | O_EXCL, 0);
 	if (fd < 0) {
 		ret = -errno;
-		goto out4;
+		goto out3;
 	}
 
 	return 0;
 
- out4:
-	unlinkat(root_fd, at(hcb_path), 0);
  out3:
-	unlinkat(root_fd, at(hinode_path), 0);
+	unlinkat(root_fd, at(hcb_path), 0);
  out2:
 	if (info != NULL)
 		renameat(root_fd, at(hinode_path), root_fd, at(hcb_path));
