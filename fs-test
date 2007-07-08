@@ -1,4 +1,4 @@
-#!/bin/bash -e
+#!/bin/bash -ex
 # if an operation fails, this script will stop
 
 trap "echo failed" EXIT;
