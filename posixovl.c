@@ -572,7 +572,22 @@ static inline int hcb_lookup_readdir(const char *dir, const char *name,
 	char path[PATH_MAX];
 	int ret;
 
-	ret = snprintf(path, sizeof(path), "%s%s", dir, name);
+	/*
+	 * Ensure that @path does not have two leading slashes or
+	 * the *at() logic does not do the right thing.
+	 */
+	if (dir[1] == '\0') {
+		/*
+		 * First character is always a slash, so if the second one is
+		 * '\0', it must be "/". I am trying to optimize here.
+		 */
+		path[0] = '/';
+		strlcpy(&path[1], name, sizeof(path) - 1);
+		ret = strlen(name) + 1;
+	} else {
+		ret = snprintf(path, sizeof(path), "%s/%s", dir, name);
+	}
+
 	if (ret >= sizeof(path))
 		return -ENAMETOOLONG;
 	if ((ret = hcb_get_deref(path, info)) < 0)
