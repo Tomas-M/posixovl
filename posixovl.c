@@ -477,24 +477,6 @@ static __attribute__((pure)) inline unsigned int is_resv(const char *path)
 	return is_resv_name(file);
 }
 
-static int generic_permission(const struct ll_hcb *info, unsigned int mask)
-{
-	const struct fuse_context *ctx = fuse_get_context();
-	mode_t mode = info->mode;
-
-	if (ctx->uid == info->uid)
-		mode >>= 6;
-	else if (ctx->gid == info->gid)
-		/*
-		 * More precisely, we would have to check if info->gid is in
-		 * all the supplementary groups of the process ctx->pid. But
-		 * there seems to be no way to getgroups() a different process.
-		 */
-		mode >>= 3;
-
-	return ((mode & mask & (R_OK | W_OK | X_OK)) == mask) ? 0 : -EACCES;
-}
-
 static inline void setfsxid(void)
 {
 	const struct fuse_context *ctx;
@@ -519,29 +501,6 @@ static inline void setrexid(void)
 	if (setregid(ctx->gid, -1) < 0)
 		perror("setregid()");
 	return;
-}
-
-static int posixovl_access(const char *path, int mode)
-{
-	char hcb_path[PATH_MAX];
-	struct ll_hcb info;
-	int ret;
-
-	if (is_resv(path))
-		return -ENOENT;
-	setrexid();
-	if ((ret = real_to_hcb(hcb_path, path)) < 0)
-		return ret;
-
-	ret = hcb_lookup(hcb_path, &info, 1);
-	if (ret == -ENOENT) {
-		/* No HCB, try real file */
-		XRET(faccessat(root_fd, at(path), mode, AT_SYMLINK_NOFOLLOW));
-	} else if (ret < 0) {
-		return ret;
-	}
-
-	return generic_permission(&info, mode);
 }
 
 static int hcb_update_or_create(const char *path, mode_t mode,
@@ -1029,8 +988,6 @@ static int hl_instantiate(const char *oldpath, const char *newpath)
 
 static int posixovl_link(const char *oldpath, const char *newpath)
 {
-	const struct fuse_context *ctx;
-	struct stat sb;
 	int ret;
 
 	if (is_resv(oldpath))
@@ -1050,13 +1007,6 @@ static int posixovl_link(const char *oldpath, const char *newpath)
 		return ret;
 	else if (ret >= 0)
 		return 0;
-
-	/* Extra check for ownerless filesystems */
-	if ((ret = posixovl_getattr(oldpath, &sb)) < 0)
-		return ret;
-	ctx = fuse_get_context();
-	if (sb.st_uid != ctx->uid && posixovl_access(oldpath, R_OK | W_OK) < 0)
-		return -EPERM;
 
 	pthread_mutex_lock(&posixovl_protect);
 	ret = hl_instantiate(oldpath, newpath);
@@ -1542,7 +1492,6 @@ static unsigned int user_allow_other(void)
 }
 
 static const struct fuse_operations posixovl_ops = {
-	.access     = posixovl_access,
 	.chmod      = posixovl_chmod,
 	.chown      = posixovl_chown,
 	.create     = posixovl_create,
@@ -1588,7 +1537,7 @@ int main(int argc, char **argv)
 
 	new_argv = malloc(sizeof(char *) * (argc + 4));
 	new_argv[new_argc++] = argv[0];
-	new_argv[new_argc++] = "-ouse_ino,fsname=posix-overlay";
+	new_argv[new_argc++] = "-odefault_permissions,use_ino,fsname=posix-overlay";
 
 	if (argc >= 3 && *argv[2] != '-') {
 		aptr = &argv[2];
