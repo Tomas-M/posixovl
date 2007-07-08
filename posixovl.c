@@ -1465,15 +1465,17 @@ static int posixovl_utimens(const char *path, const struct timespec *ts)
 	struct ll_hcb info;
 	int ret;
 #ifndef HAVE_UTIMENSAT
-	struct timeval tv;
+	struct timeval tv[2];
 #endif
 
 	if (is_resv(path))
 		return -ENOENT;
 
 #ifndef HAVE_UTIMENSAT
-	tv.tv_sec  = ts->tv_sec;
-	tv.tv_usec = ts->tv_nsec / 1000;
+	tv[0].tv_sec  = ts[0].tv_sec;
+	tv[0].tv_usec = ts[0].tv_nsec / 1000;
+	tv[1].tv_sec  = ts[1].tv_sec;
+	tv[1].tv_usec = ts[1].tv_nsec / 1000;
 #endif
 
 	setfsxid();
@@ -1492,9 +1494,9 @@ static int posixovl_utimens(const char *path, const struct timespec *ts)
 
 #ifndef HAVE_UTIMENSAT
 	if (ret == 0 && S_ISHARDLNK(info.mode))
-		ret = futimesat(root_fd, at(info.target), &tv);
+		ret = futimesat(root_fd, at(info.target), tv);
 	else
-		ret = futimesat(root_fd, at(path), &tv);
+		ret = futimesat(root_fd, at(path), tv);
 #else
 	if (ret == 0 && S_ISHARDLNK(info.mode))
 		ret = utimensat(root_fd, at(info.target),
