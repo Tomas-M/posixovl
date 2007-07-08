@@ -39,3 +39,4 @@ rm f1 f2 f3 q1 q2 null;
 echo "ok";
 
 echo "ALL DONE";
+trap "" EXIT;
