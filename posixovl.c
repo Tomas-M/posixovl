@@ -83,9 +83,6 @@
 enum {
 	/* extra errno codes */
 	ENOENT_HCB = 4096,
-	/* for hcb_new() */
-	REUSE_STAT = 1 << 0,
-	REUSE_LL   = 1 << 1,
 };
 
 struct ll_hcb {
@@ -321,11 +318,11 @@ static int ll_hcb_write(const char *path, struct ll_hcb *info, int fd)
  * @reuse:	reuse HCB (may have been filled in previously,
  *		by a failed hcb_get() for example)
  */
-static int hcb_new(const char *path, struct hcb *cb, unsigned int flags)
+static int hcb_new(const char *path, struct hcb *cb, unsigned int reuse)
 {
 	int ret;
 
-	if (flags & REUSE_STAT) {
+	if (reuse) {
 		if (cb->fd >= 0)
 			should_not_happen();
 	} else {
@@ -340,14 +337,11 @@ static int hcb_new(const char *path, struct hcb *cb, unsigned int flags)
 			cb->sb.st_mode &= ~S_IXUGO;
 	}
 
-	if (!(flags & REUSE_LL)) {
-		cb->ll.mode  = cb->sb.st_mode;
-		cb->ll.nlink = cb->sb.st_nlink;
-		cb->ll.uid   = cb->sb.st_uid;
-		cb->ll.gid   = cb->sb.st_gid;
-		cb->ll.rdev  = cb->sb.st_rdev;
-	}
-
+	cb->ll.mode  = cb->sb.st_mode;
+	cb->ll.nlink = cb->sb.st_nlink;
+	cb->ll.uid   = cb->sb.st_uid;
+	cb->ll.gid   = cb->sb.st_gid;
+	cb->ll.rdev  = cb->sb.st_rdev;
 	return 0;
 }
 
@@ -636,7 +630,7 @@ static int posixovl_chmod(const char *path, mode_t mode)
 	setfsxid();
 	ret = hcb_get_deref(path, &info);
 	if (ret == -ENOENT_HCB) {
-		if ((ret = hcb_new(path, &info, REUSE_STAT)) < 0)
+		if ((ret = hcb_new(path, &info, 1)) < 0)
 			return ret;
 	} else if (ret < 0) {
 		return ret;
@@ -656,7 +650,7 @@ static int posixovl_chown(const char *path, uid_t uid, gid_t gid)
 	setfsxid();
 	ret = hcb_get_deref(path, &info);
 	if (ret == -ENOENT_HCB) {
-		if ((ret = hcb_new(path, &info, REUSE_STAT)) < 0)
+		if ((ret = hcb_new(path, &info, 1)) < 0)
 			return ret;
 	} else if (ret < 0) {
 		return ret;
