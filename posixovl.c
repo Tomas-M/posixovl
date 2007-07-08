@@ -1351,8 +1351,6 @@ static int posixovl_symlink(const char *oldpath, const char *newpath)
 	/* symlink() not supported on underlying filesystem */
 	if ((ret = real_to_hcb(hcb_newpath, newpath)) < 0)
 		return ret;
-	if ((ret = real_to_hcb(hcb_newpath, newpath)) < 0)
-		return ret;
 
 	ctx = fuse_get_context();
 	pthread_mutex_lock(&posixovl_protect);
