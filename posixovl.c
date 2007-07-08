@@ -1364,10 +1364,11 @@ static int posixovl_symlink(const char *oldpath, const char *newpath)
 	fd = openat(root_fd, at(newpath), O_WRONLY | O_CREAT | O_EXCL, 0);
 	if (fd < 0) {
 		ret = -errno;
-		unlinkat(root_fd, at(newpath), 0);
+		unlinkat(root_fd, at(hcb_newpath), 0);
+	} else {
+		close(fd);
 	}
 	pthread_mutex_unlock(&posixovl_protect);
-	close(fd);
 	return ret;
 }
 
