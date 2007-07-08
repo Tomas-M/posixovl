@@ -1111,7 +1111,7 @@ static int posixovl_mknod(const char *path, mode_t mode, dev_t rdev)
 	fd = openat(root_fd, at(path), O_WRONLY | O_CREAT | O_EXCL, 0);
 	if (fd < 0) {
 		ret = -errno;
-		unlinkat(root_fd, at(path), 0);
+		unlinkat(root_fd, at(hcb_path), 0);
 	}
 	pthread_mutex_unlock(&posixovl_protect);
 	close(fd);
