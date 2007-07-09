@@ -812,7 +812,7 @@ static int hl_try_demote(const char *path)
 	int ret;
 
 	ret = hcb_lookup(path, &info_l0);
-	if (ret == -ENOENT)
+	if (ret == -ENOENT_HCB)
 		return 0;
 	if (ret < 0)
 		return ret;
@@ -1397,6 +1397,7 @@ static int posixovl_truncate(const char *path, off_t length)
 
 	if (fd < 0)
 		return -errno;
+	ret = 0;
 	if (ftruncate(fd, length) < 0)
 		ret = -errno;
 
