@@ -1085,13 +1085,6 @@ static int posixovl_link(const char *oldpath, const char *newpath)
 	return ret;
 }
 
-static int posixovl_lock(const char *path, struct fuse_file_info *filp,
-    int cmd, struct flock *fl)
-{
-	setfsxid();
-	XRET(fcntl(filp->fh, cmd, fl));
-}
-
 static int posixovl_mkdir(const char *path, mode_t mode)
 {
 	if (is_resv(path))
@@ -1518,7 +1511,6 @@ static const struct fuse_operations posixovl_ops = {
 	.getattr    = posixovl_getattr,
 	.init       = posixovl_init,
 	.link       = posixovl_link,
-	.lock       = posixovl_lock,
 	.mkdir      = posixovl_mkdir,
 	.mknod      = posixovl_mknod,
 	.open       = posixovl_open,
