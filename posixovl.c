@@ -617,11 +617,23 @@ static inline const struct fuse_context *setfsxid(void)
 	const struct fuse_context *ctx = fuse_get_context();
 	if (!perform_setfsxid)
 		return ctx;
-	if (setfsuid(ctx->uid) < 0)
-		perror("setfsuid");
-	if (setfsgid(ctx->gid) < 0)
-		perror("setfsgid");
+	if (setfsuid(ctx->uid) < 0 || setfsgid(ctx->gid) < 0)
+		perror("setfsxid");
 	return ctx;
+}
+
+static inline void setfsuidp(const char *path)
+{
+	struct stat sb;
+	if (!perform_setfsxid)
+		return;
+	if (fstatat(root_fd, at(path), &sb, AT_SYMLINK_NOFOLLOW) < 0) {
+		perror("fstatat");
+		return;
+	}
+	if (setfsuid(sb.st_uid) < 0)
+		perror("setfsuidp");
+	return;
 }
 
 static inline const struct fuse_context *setrexid(void)
@@ -636,6 +648,105 @@ static inline const struct fuse_context *setrexid(void)
 	return ctx;
 }
 
+/*
+ * supports_owners - check whether @path can do that
+ * @path:	path to existing file
+ * @uid:	uid to change to (used for figuring out)
+ * @gid:	gid to change to
+ * @restore:	restore permissions after check
+ *
+ * This has to be looked up on a per-path basis, because it is possible to
+ * mount a filesystem supporting permissions on a directory on a filesystem
+ * that does not, as in, for example, the following case:
+ * 	mount -t vfat /dev/foo /mnt
+ * 	mount -t xfs  /dev/bar /mnt/sub
+ * 	mount.posixovl /mnt
+ *
+ * Note that on a filesystem which supports owners, our fchownat() will
+ * always succeed (or always fail), because the kernel checks for
+ * capability rather than FSUID. (Good thing.)
+ */
+static unsigned int supports_owners(const char *path, uid_t uid, gid_t gid,
+    unsigned int restore)
+{
+	struct stat orig_sb, new_sb;
+	uid_t work_uid = -1;
+	gid_t work_gid = -1;
+
+	if (fstatat(root_fd, at(path), &orig_sb, AT_SYMLINK_NOFOLLOW) < 0) {
+		perror("fstatat");
+		return 0;
+	}
+
+	/*
+	 * Some cases to consider:
+	 *  - No permission support and st_uid is 0:
+	 * => mounter uid is 0, @work_uid to change to must not be 0
+	 *  - No permission support and st_uid is not 0:
+	 * => mounter uid is not 0, change to 0 for test.
+	 *  - Permisson support:
+	 * => fchownat() will succeed
+	 */
+	if (uid != -1) {
+		if (orig_sb.st_uid != 0)
+			work_uid = 0;
+		else if (uid == 0)
+			work_uid = -2; /* let's hope it is unused */
+		else
+			work_uid = uid;
+	}
+	if (gid != -1) {
+		if (orig_sb.st_gid != 0)
+			work_gid = 0;
+		else if (gid == 0)
+			work_gid = -2;
+		else
+			work_gid = gid;
+	}
+	if (fchownat(root_fd, at(path), work_uid, work_gid,
+	    AT_SYMLINK_NOFOLLOW) < 0)
+		return 0;
+	if (fstatat(root_fd, at(path), &new_sb, AT_SYMLINK_NOFOLLOW) < 0) {
+		perror("fstatat");
+		return 0;
+	}
+
+	if (restore)
+		fchownat(root_fd, at(path), orig_sb.st_uid,
+		         orig_sb.st_gid, AT_SYMLINK_NOFOLLOW);
+
+	return new_sb.st_uid != work_uid || new_sb.st_gid != work_gid;
+}
+
+/*
+ * supports_permissions - check whether @path can do that
+ * @path:	existing path to file
+ *
+ * Does not restore the original mode.
+ */
+static unsigned int supports_permissions(const char *path)
+{
+	struct stat orig_sb, new_sb;
+	mode_t work_mode;
+
+	if (fstatat(root_fd, at(path), &orig_sb, AT_SYMLINK_NOFOLLOW) < 0) {
+		/* literally BUG() */
+		perror("fstatat");
+		return 0;
+	}
+
+	/* Pick some magic */
+	work_mode = (orig_sb.st_mode ^ S_IRUSR ^ S_IXGRP) & ~S_IROTH;
+
+	if (fchmodat(root_fd, at(path), work_mode, AT_SYMLINK_NOFOLLOW) < 0)
+		return 0;
+	if (fstatat(root_fd, at(path), &new_sb, AT_SYMLINK_NOFOLLOW) < 0) {
+		perror("fstatat");
+		return 0;
+	}
+	return new_sb.st_mode == work_mode;
+}
+
 static int posixovl_chmod(const char *path, mode_t mode)
 {
 	struct hcb info;
@@ -646,6 +757,9 @@ static int posixovl_chmod(const char *path, mode_t mode)
 	setfsxid();
 	ret = hcb_get_deref(path, &info);
 	if (ret == -ENOENT_HCB) {
+		if (supports_permissions(path))
+			XRET(fchmodat(root_fd, at(path), mode,
+			     AT_SYMLINK_NOFOLLOW));
 		if ((ret = hcb_new(path, &info, 1)) < 0)
 			return ret;
 	} else if (ret < 0) {
@@ -666,6 +780,9 @@ static int posixovl_chown(const char *path, uid_t uid, gid_t gid)
 	setfsxid();
 	ret = hcb_get_deref(path, &info);
 	if (ret == -ENOENT_HCB) {
+		if (supports_owners(path, uid, gid, 0))
+			XRET(fchownat(root_fd, at(path), uid, gid,
+			     AT_SYMLINK_NOFOLLOW));
 		if ((ret = hcb_new(path, &info, 1)) < 0)
 			return ret;
 	} else if (ret < 0) {
@@ -692,36 +809,6 @@ unsigned int could_be_too_long(const char *path)
 	       1 + HCB_PREFIX_LEN >= PATH_MAX;
 }
 
-/*
- * supports_permissions - check whether @path can do that
- * @path:	path to check
- * @mode:	mode that the file should have
- *
- * This has to be looked up on a per-path basis, because it is possible to
- * mount a filesystem supporting permissions (e.g. XFS) on a directory on a
- * filesystem that does not.
- * 	mount -t vfat /dev/foo /mnt
- * 	mount -t xfs  /dev/bar /mnt/sub
- */
-static unsigned int supports_permissions(const char *path, mode_t mode)
-{
-	/* Pick some magic */
-	mode_t work_mode = (mode ^ S_IRUSR ^ S_IXGRP) & ~S_IROTH;
-	struct stat sb;
-
-//	if (fchmodat(root_fd, at(path), work_mode, AT_SYMLINK_NOFOLLOW) < 0)
-	if (chmod(at(path), work_mode) < 0)
-		return 0;
-	if (fstatat(root_fd, at(path), &sb, AT_SYMLINK_NOFOLLOW) < 0)
-		/* literally BUG() */
-		perror("fstatat");
-	if (sb.st_mode != work_mode)
-		return 0;
-//	fchmodat(root_fd, at(path), mode, AT_SYMLINK_NOFOLLOW);
-	chmod(at(path), mode);
-	return 1;
-}
-
 static int posixovl_create(const char *path, mode_t mode,
     struct fuse_file_info *filp)
 {
@@ -741,7 +828,7 @@ static int posixovl_create(const char *path, mode_t mode,
 
 	filp->fh = fd;
 
-	if (ctx->uid != root_uid || !supports_permissions(path, mode)) {
+	if (ctx->uid != root_uid || !supports_permissions(path)) {
 		if ((ret = hcb_new(path, &cb, 0)) < 0)
 			return 0;
 		cb.ll.mode = mode;
@@ -1447,7 +1534,11 @@ static int posixovl_utimens(const char *path, const struct timespec *ts)
 	tv[1].tv_usec = ts[1].tv_nsec / 1000;
 #endif
 
-	setfsxid();
+	if (supports_owners(path, 0, 0, 1))
+		setfsxid();
+	else
+		setfsuidp(path);
+
 	ret = hcb_lookup(path, &info);
 	if (ret < 0 && ret != -ENOENT_HCB)
 		return ret;
