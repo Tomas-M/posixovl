@@ -1646,7 +1646,7 @@ int main(int argc, char **argv)
 
 	new_argv = malloc(sizeof(char *) * (argc + 4));
 	new_argv[new_argc++] = argv[0];
-	new_argv[new_argc++] = "-odefault_permissions,use_ino,fsname=posix-overlay";
+	new_argv[new_argc++] = "-oattr_timeout=0,default_permissions,use_ino,fsname=posix-overlay";
 
 	if (argc >= 3 && *argv[2] != '-') {
 		aptr = &argv[2];
