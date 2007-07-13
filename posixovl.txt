@@ -19,6 +19,13 @@ Terminology:
 	L1 HCB:  /.pxovn.ID (sometimes called the HL.I-node)
 
 Notes:
+	Do not use the umask= mount option on the underlying filesystem. 
+	posixovl assumes the default umask of 0022. Permissions will leak if
+	you do not follow this (e.g. files may have "a +w bit too much for your
+	security"). You do not need the umask= mount option on the underlying
+	filesystem! Giving write permission inside the posixovl mount is the
+	proper way.
+
 	If no HCB exists for a file or directory, the default permissions are
 	644 and 755, respectively. The owner and group of the inode will be the
 	owner/group of the real file.

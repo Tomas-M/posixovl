@@ -105,7 +105,6 @@ struct hcb {
 
 /* Global */
 static const char *root_dir;
-static uid_t root_uid;
 static int root_fd;
 static unsigned int perform_setfsxid;
 static pthread_mutex_t posixovl_protect = PTHREAD_MUTEX_INITIALIZER;
@@ -804,6 +803,28 @@ unsigned int could_be_too_long(const char *path)
 	       1 + HCB_PREFIX_LEN >= PATH_MAX;
 }
 
+/*
+ * parent_owner_match -
+ * @path:	path, of which the parent is to be checked
+ * @uid:	uid to test
+ *
+ * Checks whether @path's parent is owned by @uid.
+ * @path denotes a path on the real volume, hence no HCB lookup here.
+ */
+static inline unsigned int parent_owner_match(const char *path, uid_t uid)
+{
+	struct stat sb;
+	int ret;
+
+	ret = fstatat(root_fd, at(path), &sb, AT_SYMLINK_NOFOLLOW);
+	if (ret < 0) {
+		should_not_happen();
+		return 0;
+	}
+
+	return sb.st_uid == uid;
+}
+
 static int posixovl_create(const char *path, mode_t mode,
     struct fuse_file_info *filp)
 {
@@ -823,7 +844,18 @@ static int posixovl_create(const char *path, mode_t mode,
 
 	filp->fh = fd;
 
-	if (ctx->uid != root_uid || !supports_permissions(path)) {
+	/*
+	 * Assuming default umask 0022. Default file permissions 0644
+	 * do not trigger creation of a HCB.
+	 * We need (rather: want) a HCB if the fsuid is different from
+	 * the owner of the underlying mount, if owners are not
+	 * supported.
+	 * Fuse oddity: @mode includes S_IFREG (contraty to mkdir())
+	 */
+	if (((mode & ~S_IWUSR) != (S_IFREG | S_IRUGO) &&
+	    !supports_permissions(path)) ||
+	    (!parent_owner_match(path, ctx->uid) &&
+	    !supports_owners(path, ctx->uid, ctx->gid, 1))) {
 		if ((ret = hcb_new(path, &cb, 0)) < 0)
 			return 0;
 		cb.ll.mode = mode;
@@ -1169,13 +1201,34 @@ static int posixovl_link(const char *oldpath, const char *newpath)
 
 static int posixovl_mkdir(const char *path, mode_t mode)
 {
+	const struct fuse_context *ctx;
+	struct hcb cb;
+	int ret;
+
 	if (is_resv(path))
 		return -EPERM;
 	if (could_be_too_long(path))
 		return -ENAMETOOLONG;
 
-	setfsxid();
-	XRET(mkdirat(root_fd, at(path), mode));
+	ctx = setfsxid();
+	ret = mkdirat(root_fd, at(path), mode);
+	if (ret < 0)
+		return -errno;
+
+	/* FUSE oddity: @mode does not include S_IFDIR */
+	if (((mode & ~S_IWUSR) != (S_IRUGO | S_IXUGO) &&
+	    !supports_permissions(path)) ||
+	    (!parent_owner_match(path, ctx->uid) &&
+	    !supports_owners(path, ctx->uid, ctx->gid, 1))) {
+		if ((ret = hcb_new(path, &cb, 0)) < 0)
+			return 0;
+		cb.ll.mode = S_IFDIR | mode;
+		cb.ll.uid  = ctx->uid;
+		cb.ll.gid  = ctx->gid;
+		hcb_update(&cb);
+	}
+
+	return 0;
 }
 
 static int posixovl_mknod(const char *path, mode_t mode, dev_t rdev)
@@ -1631,8 +1684,6 @@ int main(int argc, char **argv)
 		perror("fstat");
 		abort();
 	}
-
-	root_uid = sb.st_uid;
 
 	new_argv = malloc(sizeof(char *) * (argc + 4));
 	new_argv[new_argc++] = argv[0];
