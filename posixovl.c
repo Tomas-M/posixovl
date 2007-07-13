@@ -636,18 +636,6 @@ static inline void setfsuidp(const char *path)
 	return;
 }
 
-static inline const struct fuse_context *setrexid(void)
-{
-	const struct fuse_context *ctx = fuse_get_context();
-	if (!perform_setfsxid)
-		return ctx;
-	if (setreuid(ctx->uid, -1) < 0)
-		perror("setreuid()");
-	if (setregid(ctx->gid, -1) < 0)
-		perror("setregid()");
-	return ctx;
-}
-
 /*
  * supports_owners - check whether @path can do that
  * @path:	path to existing file
