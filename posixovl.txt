@@ -9,10 +9,7 @@ Usage
 Supports
 ========
 	chmod, chown, hardlink, mkfifo, mknod, symlink/readlink
-
-Does not support
-================
-	ACLs/xattrs
+	ACLs/xattrs (only in passthrough mode, no emulation)
 
 Notes
 =====

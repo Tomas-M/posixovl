@@ -29,6 +29,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <asm/unistd.h>
+#include <attr/xattr.h>
 #include "config.h"
 #ifndef S_IRUGO
 #	define S_IRUGO (S_IRUSR | S_IRGRP | S_IROTH)
@@ -958,6 +959,12 @@ static int posixovl_getattr(const char *path, struct stat *sb)
 	return 0;
 }
 
+static int posixovl_getxattr(const char *path, const char *name,
+    char *value, size_t size)
+{
+	XRET(lgetxattr(at(path), name, value, size));
+}
+
 static int posixovl_fgetattr(const char *path, struct stat *sb,
     struct fuse_file_info *filp)
 {
@@ -1199,6 +1206,11 @@ static int posixovl_link(const char *oldpath, const char *newpath)
 	return ret;
 }
 
+static int posixovl_listxattr(const char *path, char *list, size_t size)
+{
+	XRET(llistxattr(at(path), list, size));
+}
+
 static int posixovl_mkdir(const char *path, mode_t mode)
 {
 	const struct fuse_context *ctx;
@@ -1373,6 +1385,11 @@ static int posixovl_readlink(const char *path, char *dest, size_t size)
 	return 0;
 }
 
+static int posixovl_removexattr(const char *path, const char *name)
+{
+	XRET(lremovexattr(path, name));
+}
+
 static int posixovl_rename(const char *oldpath, const char *newpath)
 {
 	char new_hcbpath[PATH_MAX];
@@ -1433,6 +1450,12 @@ static int posixovl_rmdir(const char *path)
 	if (ret == 0 && unlinkat(root_fd, at(info.path), 0) < 0)
 		return -errno;
 	XRET(unlinkat(root_fd, at(path), AT_REMOVEDIR));
+}
+
+static int posixovl_setxattr(const char *path, const char *name,
+    const char *value, size_t size, int flags)
+{
+	XRET(lsetxattr(at(path), name, value, size, flags));
 }
 
 static int posixovl_statfs(const char *path, struct statvfs *sb)
@@ -1643,8 +1666,10 @@ static const struct fuse_operations posixovl_ops = {
 	.fgetattr   = posixovl_fgetattr,
 	.ftruncate  = posixovl_ftruncate,
 	.getattr    = posixovl_getattr,
+	.getxattr    = posixovl_getxattr,
 	.init       = posixovl_init,
 	.link       = posixovl_link,
+	.listxattr   = posixovl_listxattr,
 	.mkdir      = posixovl_mkdir,
 	.mknod      = posixovl_mknod,
 	.open       = posixovl_open,
@@ -1652,8 +1677,10 @@ static const struct fuse_operations posixovl_ops = {
 	.readdir    = posixovl_readdir,
 	.readlink   = posixovl_readlink,
 	.release    = posixovl_close,
+	.removexattr = posixovl_removexattr,
 	.rename     = posixovl_rename,
 	.rmdir      = posixovl_rmdir,
+	.setxattr    = posixovl_setxattr,
 	.statfs     = posixovl_statfs,
 	.symlink    = posixovl_symlink,
 	.truncate   = posixovl_truncate,
