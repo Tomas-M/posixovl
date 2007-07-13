@@ -1377,7 +1377,7 @@ static int posixovl_rmdir(const char *path)
 		return -ENOENT;
 	setfsxid();
 	ret = hcb_lookup(path, &info);
-	if (ret == 0 && unlinkat(root_fd, info.path, 0) < 0)
+	if (ret == 0 && unlinkat(root_fd, at(info.path), 0) < 0)
 		return -errno;
 	XRET(unlinkat(root_fd, at(path), AT_REMOVEDIR));
 }
