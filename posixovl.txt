@@ -1,24 +1,21 @@
 
-Usage:
-	mount.posixovl /vfat [fuseopts] /mnt
+Usage
+=====
+	mount.posixovl [/source_dir] /target_dir [fuseopts]
 
-Supports:
-	chmod
-	chown
-	mkfifo
-	mknod
-	symlink/readlink
+	If no /source_dir is given, /target_dir specifies both source and
+	target, yielding an "overmount".
 
-Does not support:
+Supports
+========
+	chmod, chown, hardlink, mkfifo, mknod, symlink/readlink
+
+Does not support
+================
 	ACLs/xattrs
 
-Terminology:
-	L0 file: /foo.txt
-	L0 HCB:  /.pxovl.foo.txt
-	L1 file: /.pxovd.ID (sometimes called the HL.D-node)
-	L1 HCB:  /.pxovn.ID (sometimes called the HL.I-node)
-
-Notes:
+Notes
+=====
 	Do not use the umask= mount option on the underlying filesystem. 
 	posixovl assumes the default umask of 0022. Permissions will leak if
 	you do not follow this (e.g. files may have "a +w bit too much for your
