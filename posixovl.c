@@ -1422,12 +1422,8 @@ static int posixovl_symlink(const char *oldpath, const char *newpath)
 	info.ll.uid   = ctx->uid;
 	info.ll.gid   = ctx->gid;
 	strlcpy(info.ll.new_target, oldpath, sizeof(info.ll.new_target));
-
-	pthread_mutex_lock(&posixovl_protect);
-	if ((ret = hcb_update(&info)) < 0) {
-		pthread_mutex_unlock(&posixovl_protect);
+	if ((ret = hcb_update(&info)) < 0)
 		return ret;
-	}
 
 	fd = openat(root_fd, at(newpath), O_WRONLY | O_CREAT | O_EXCL, 0);
 	if (fd < 0) {
@@ -1437,7 +1433,6 @@ static int posixovl_symlink(const char *oldpath, const char *newpath)
 		close(fd);
 	}
 
-	pthread_mutex_unlock(&posixovl_protect);
 	return ret;
 }
 
