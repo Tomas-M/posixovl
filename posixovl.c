@@ -57,11 +57,22 @@
 	(((minor) & 0xFFF00) << 12) | (((major) & 0xFFF) << 8))
 
 /* Buggers */
-#define should_not_happen() \
-	do { \
-		fprintf(stderr, "Should never happen! %s:%u\n", \
-		        __FILE__, __LINE__); \
-	} while (0)
+#ifndef NDEBUG
+#	define should_never_happen() \
+		do { \
+			fprintf(stderr, "CRITICAL: Should NEVER happen! %s:%u\n", \
+			        __FILE__, __LINE__); \
+			abort(); \
+		} while (0)
+#	define should_not_happen() \
+		do { \
+			fprintf(stderr, "WARNING: Should not happen! %s:%u\n", \
+			        __FILE__, __LINE__); \
+		} while (0)
+#else
+#	define should_never_happen() do {} while(0)
+#	define should_not_happen()   do {} while(0)
+#endif
 #define hcb_got_busted(path) \
 	fprintf(stderr, "HCB %s got busted\n", (path))
 
@@ -138,7 +149,7 @@ static inline int lock_write(int fd)
 static __attribute__((pure)) const char *at(const char *in)
 {
 	if (*in != '/')
-		should_not_happen();
+		should_never_happen();
 	if (in[1] == '\0')
 		return ".";
 	return in + 1;
@@ -199,7 +210,7 @@ static int __real_to_hcb(char *dest, size_t destsize, const char *src)
 
 	filename_part = strrchr(src, '/');
 	if (filename_part++ == NULL)
-		should_not_happen();
+		should_never_happen();
 
 	if (strncmp(filename_part, HL_DNODE_PREFIX, HL_DNODE_PREFIX_LEN) == 0)
 		ret = snprintf(dest, destsize, "%.*s" HL_INODE_PREFIX "%s",
@@ -429,7 +440,7 @@ static int hcb_deref(struct hcb *cb)
 	int ret;
 
 	if (cb->fd < 0)
-		should_not_happen();
+		should_never_happen();
 	if (!S_ISHARDLNK(cb->ll.mode))
 		return 0;
 
@@ -608,7 +619,7 @@ static __attribute__((pure)) inline unsigned int is_resv(const char *path)
 {
 	const char *file = strrchr(path, '/');
 	if (file++ == NULL)
-		should_not_happen();
+		should_never_happen();
 	return is_resv_name(file);
 }
 
@@ -1087,7 +1098,8 @@ static int hl_up_nlink(const char *l1_path)
 		return ret;
 	if (S_ISHARDLNK(cb.ll.mode))
 		should_not_happen();
-	++cb.ll.nlink;
+	else
+		++cb.ll.nlink;
 	return hcb_update(&cb);
 }
 
@@ -1105,8 +1117,11 @@ static int hl_drop(const char *l1_path)
 
 	if ((ret = hcb_get(l1_path, &cb)) < 0)
 		return ret;
-	if (S_ISHARDLNK(cb.ll.mode))
+	if (S_ISHARDLNK(cb.ll.mode)) {
 		should_not_happen();
+		hcb_put(&cb);
+		return 0;
+	}
 	if (cb.ll.nlink == 1) {
 		hcb_put(&cb);
 		pthread_mutex_lock(&posixovl_protect);
