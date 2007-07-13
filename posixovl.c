@@ -612,6 +612,9 @@ static __attribute__((pure)) inline unsigned int is_resv(const char *path)
 	return is_resv_name(file);
 }
 
+/*
+ * setfsxid - set fsuid/fsgid to requester uid/gid
+ */
 static inline const struct fuse_context *setfsxid(void)
 {
 	const struct fuse_context *ctx = fuse_get_context();
@@ -622,6 +625,10 @@ static inline const struct fuse_context *setfsxid(void)
 	return ctx;
 }
 
+/*
+ * setfsuidp - set fsuid/fsgid to owner of @path
+ * @path:	file
+ */
 static inline void setfsuidp(const char *path)
 {
 	struct stat sb;
@@ -1400,7 +1407,7 @@ static int posixovl_symlink(const char *oldpath, const char *newpath)
 	else if (ret >= 0)
 		return 0;
 
-	/* symlink() not supported on underlying filesystem */
+	/* symlink() not supported on @path */
 
 	if ((ret = hcb_new(newpath, &info, 0)) < 0)
 		return ret;

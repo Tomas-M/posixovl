@@ -17,6 +17,8 @@ AC_CHECK_HEADER(attr/xattr.h, [],
 		AC_MSG_ERROR([libattr-devel not installed]))
 AC_CHECK_HEADER(fuse.h, [],
 		AC_MSG_ERROR([fuse-devel not installed]))
+
+# Minium requirements for utimensat(): Linux 2.6.22-rc1 and Glibc 2.6
 AC_MSG_CHECKING([for utimensat()])
 AC_COMPILE_IFELSE([
 		#include <asm/unistd.h>

@@ -1,0 +1,6 @@
+
+Installation when using an subversion snapshot:
+
+	./autogen.sh
+	./configure
+	make
