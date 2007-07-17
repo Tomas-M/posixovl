@@ -768,6 +768,7 @@ static int posixovl_chmod(const char *path, mode_t mode)
 			     AT_SYMLINK_NOFOLLOW));
 		if ((ret = hcb_new(path, &info, 1)) < 0)
 			return ret;
+		/* nlink already set (hcb_new() stat'ed @path) */
 	} else if (ret < 0) {
 		return ret;
 	}
@@ -791,6 +792,7 @@ static int posixovl_chown(const char *path, uid_t uid, gid_t gid)
 			     AT_SYMLINK_NOFOLLOW));
 		if ((ret = hcb_new(path, &info, 1)) < 0)
 			return ret;
+		/* nlink already set (hcb_new() stat'ed @path) */
 	} else if (ret < 0) {
 		return ret;
 	}
@@ -870,6 +872,7 @@ static int posixovl_create(const char *path, mode_t mode,
 	    !supports_owners(path, ctx->uid, ctx->gid, 1))) {
 		if ((ret = hcb_new(path, &cb, 0)) < 0)
 			return 0;
+		/* nlink already set (hcb_new() stat'ed @path) */
 		cb.ll.mode = mode;
 		cb.ll.uid  = ctx->uid;
 		cb.ll.gid  = ctx->gid;
@@ -1122,6 +1125,8 @@ static int hl_drop(const char *l1_path)
 		hcb_put(&cb);
 		return 0;
 	}
+	if (cb.ll.nlink == 0)
+		should_not_happen();
 	if (cb.ll.nlink == 1) {
 		hcb_put(&cb);
 		pthread_mutex_lock(&posixovl_protect);
@@ -1249,6 +1254,7 @@ static int posixovl_mkdir(const char *path, mode_t mode)
 	    !supports_owners(path, ctx->uid, ctx->gid, 1))) {
 		if ((ret = hcb_new(path, &cb, 0)) < 0)
 			return 0;
+		/* nlink already set (hcb_new() stat'ed @path) */
 		cb.ll.mode = S_IFDIR | mode;
 		cb.ll.uid  = ctx->uid;
 		cb.ll.gid  = ctx->gid;
@@ -1281,10 +1287,11 @@ static int posixovl_mknod(const char *path, mode_t mode, dev_t rdev)
 	 */
 	if ((ret = hcb_new(path, &info, 0)) < 0)
 		return ret;
-	info.ll.mode = mode;
-	info.ll.uid  = ctx->uid;
-	info.ll.gid  = ctx->gid;
-	info.ll.rdev = rdev;
+	info.ll.mode  = mode;
+	info.ll.nlink = 1;
+	info.ll.uid   = ctx->uid;
+	info.ll.gid   = ctx->gid;
+	info.ll.rdev  = rdev;
 	if ((ret = hcb_update(&info)) < 0)
 		return ret;
 

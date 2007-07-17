@@ -1,6 +1,15 @@
-#!/bin/bash -ex
-# if an operation fails, this script will stop
+#!/bin/bash -x
 
+#
+# So that the root tests can also be run when - for some reason -
+# you do not have UID 0. (`do_root_tests=1 ./fs-test`)
+#
+if [ -z "$do_root_tests" ]; then
+	[ "`id -u`" -eq 0 ];
+	do_root_tests=$?;
+fi;
+
+set -e;
 trap "echo failed" EXIT;
 
 echo -n "mass links (trigger fuse cache artifact) ... ";
@@ -17,6 +26,22 @@ ls -li;
 usleep 600000;
 ls -li;
 rm -f w[012345678];
+
+# -- FUSE cheats us -- test does not work
+#echo -n "FIFO hardlink ... ";
+#mkfifo h1;
+#ln h1 h2;
+#result=$(
+#	echo -n "test1" >h1;
+#	echo -n "test2" >h2;
+#	head -n1 h2;
+#);
+#[ "$result" == "test1test2" -o "$result" == "test2test1" ];
+
+echo -n "hardlink FIFO deletion ... ";
+rm -f h1;
+[ -e h2 ];
+rm -f h2;
 
 echo -n "creating tmp files ... ";
 echo f1 >f1;
@@ -39,15 +64,17 @@ echo -n "truncate ... ";
 [ ! -s f2 ];
 echo "ok";
 
-echo -n "changing ownerships and permissions ... ";
-chown 0:0 f1 f2 f3;
-chmod ago+x f1 f2 f3;
-chmod ago-x f1 f2 f3;
-echo "ok";
+if [ $do_root_tests ]; then
+	echo -n "changing ownerships and permissions ... ";
+	chown 0:0 f1 f2 f3;
+	chmod ago+x f1 f2 f3;
+	chmod ago-x f1 f2 f3;
+	echo "ok";
 
-echo -n "special device creation ... ";
-mknod null c 1 3;
-echo "ok";
+	echo -n "special device creation ... ";
+	mknod null c 1 3;
+	echo "ok";
+fi;
 
 echo -n "cleanup ... ";
 rm f1 f2 f3 q1 q2 null;
