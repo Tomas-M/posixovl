@@ -1,18 +1,27 @@
 #!/bin/bash -x
 
+function announce()
+{
+	set +x;
+	if [ -t 0 ]; then echo -en "\e[1;37;44m"; fi;
+	echo -en "$1";
+	if [ -t 0 ]; then echo -e "\e[0m"; fi;
+	set -x;
+}
+
 #
 # So that the root tests can also be run when - for some reason -
 # you do not have UID 0. (`do_root_tests=1 ./fs-test`)
 #
 if [ -z "$do_root_tests" ]; then
 	[ "`id -u`" -eq 0 ];
-	do_root_tests=$?;
+	do_root_tests=$[!$?];
 fi;
 
 set -e;
 trap "echo failed" EXIT;
 
-echo -n "mass links (trigger fuse cache artifact) ... ";
+announce "mass links (trigger fuse cache artifact)";
 echo hello world >w0;
 ln w0 w1;
 ln w1 w2;
@@ -27,10 +36,11 @@ usleep 600000;
 ls -li;
 rm -f w[012345678];
 
+announce "FIFO hardlink";
+mkfifo h1;
+ln h1 h2;
+
 # -- FUSE cheats us -- test does not work
-#echo -n "FIFO hardlink ... ";
-#mkfifo h1;
-#ln h1 h2;
 #result=$(
 #	echo -n "test1" >h1;
 #	echo -n "test2" >h2;
@@ -38,47 +48,39 @@ rm -f w[012345678];
 #);
 #[ "$result" == "test1test2" -o "$result" == "test2test1" ];
 
-echo -n "hardlink FIFO deletion ... ";
+announce "hardlink FIFO deletion";
 rm -f h1;
 [ -e h2 ];
 rm -f h2;
 
-echo -n "creating tmp files ... ";
+announce "creating tmp files";
 echo f1 >f1;
 echo f2 >f2;
 echo f3 >f3;
-echo "ok";
 
-echo -n "linking ... ";
+announce "linking";
 ln -sf f1 q1;
 ln -f f2 q2;
-echo "ok";
 
-echo -n "verifying linked data ... ";
+announce "verifying linked data ... ";
 cat f1 | grep -q f1;
 cat f2 | grep -q f2;
-echo "ok";
 
-echo -n "truncate ... ";
+announce "truncate";
 >f2;
 [ ! -s f2 ];
-echo "ok";
 
-if [ $do_root_tests ]; then
-	echo -n "changing ownerships and permissions ... ";
+if [ $do_root_tests -eq 1 ]; then
+	announce "changing ownerships and permissions";
 	chown 0:0 f1 f2 f3;
 	chmod ago+x f1 f2 f3;
 	chmod ago-x f1 f2 f3;
-	echo "ok";
 
-	echo -n "special device creation ... ";
+	announce "special device creation";
 	mknod null c 1 3;
-	echo "ok";
+	rm null;
 fi;
 
-echo -n "cleanup ... ";
-rm f1 f2 f3 q1 q2 null;
-echo "ok";
-
-echo "ALL DONE";
+rm f1 f2 f3 q1 q2;
 trap "" EXIT;
+announce "All done";
