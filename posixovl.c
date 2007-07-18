@@ -24,6 +24,7 @@
 #include <limits.h>
 #include <pthread.h>
 #include <stdarg.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -607,7 +608,7 @@ static inline int hcb_lookup_readdir(const char *dir, const char *name,
 	return 0;
 }
 
-static __attribute__((pure)) inline unsigned int is_resv_name(const char *name)
+static __attribute__((pure)) inline bool is_resv_name(const char *name)
 {
 	return strncmp(name, HCB_PREFIX, HCB_PREFIX_LEN) == 0 ||
 	       strncmp(name, HL_DNODE_PREFIX, HL_DNODE_PREFIX_LEN) == 0 ||
@@ -615,7 +616,7 @@ static __attribute__((pure)) inline unsigned int is_resv_name(const char *name)
 	       strcmp(name, HCB_PREFIX1) == 0;
 }
 
-static __attribute__((pure)) inline unsigned int is_resv(const char *path)
+static __attribute__((pure)) inline bool is_resv(const char *path)
 {
 	const char *file = strrchr(path, '/');
 	if (file++ == NULL)
@@ -672,8 +673,8 @@ static inline void setfsuidp(const char *path)
  * always succeed (or always fail), because the kernel checks for
  * capability rather than FSUID. (Good thing.)
  */
-static unsigned int supports_owners(const char *path, uid_t uid, gid_t gid,
-    unsigned int restore)
+static bool supports_owners(const char *path, uid_t uid,
+    gid_t gid, bool restore)
 {
 	struct stat orig_sb, new_sb;
 	uid_t work_uid = -1;
@@ -809,8 +810,7 @@ static int posixovl_close(const char *path, struct fuse_file_info *filp)
 	XRET(close(filp->fh));
 }
 
-static __attribute__((pure)) inline
-unsigned int could_be_too_long(const char *path)
+static __attribute__((pure)) inline bool could_be_too_long(const char *path)
 {
 	/* Longest possible case is S_ISDIR: /root/path/.pxovl. */
 	return strlen(root_dir) + strlen(path) +
@@ -825,7 +825,7 @@ unsigned int could_be_too_long(const char *path)
  * Checks whether @path's parent is owned by @uid.
  * @path denotes a path on the real volume, hence no HCB lookup here.
  */
-static inline unsigned int parent_owner_match(const char *path, uid_t uid)
+static inline bool parent_owner_match(const char *path, uid_t uid)
 {
 	struct stat sb;
 	int ret;
@@ -1007,7 +1007,7 @@ static void *posixovl_init(struct fuse_conn_info *conn)
  * @l0_hcb_exists:	what it says
  */
 static int hl_promote(const char *l0_path, const struct hcb *orig_info,
-    unsigned int l0_hcb_exists)
+    bool l0_hcb_exists)
 {
 	char l1_path[PATH_MAX], l1_hcb[PATH_MAX];
 	struct stat work_sb;
@@ -1661,19 +1661,19 @@ static int posixovl_write(const char *path, const char *buffer, size_t size,
 	XRET(write(filp->fh, buffer, size));
 }
 
-static unsigned int user_allow_other(void)
+static bool user_allow_other(void)
 {
-	unsigned int ret = 0;
+	bool ret = false;
 	char buf[64];
 	FILE *fp;
 
 	if ((fp = fopen("/etc/fuse.conf", "r")) == NULL)
-		return 0;
+		return false;
 	while (fgets(buf, sizeof(buf), fp) != NULL)
 		/* no fancy line ending checks or anything */
 		if (strncmp(buf, "user_allow_other",
 		    sizeof("user_allow_other") - 1) == 0) {
-			ret = 1;
+			ret = true;
 			break;
 		}
 
