@@ -383,7 +383,11 @@ static int hcb_get(const char *path, struct hcb *cb)
 
 	if ((ret = real_to_hcb(cb->path, path)) < 0)
 		return ret;
-	if ((cb->fd = openat(root_fd, at(cb->path), O_RDWR)) < 0) {
+	cb->fd = openat(root_fd, at(cb->path), O_RDWR);
+	if (cb->fd < 0 && errno == EACCES)
+		/* Retry read-only */
+		cb->fd = openat(root_fd, at(cb->path), O_RDONLY);
+	if (cb->fd < 0) {
 		if (errno == ENOENT)
 			return -ENOENT_HCB;
 		else
