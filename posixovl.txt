@@ -13,12 +13,14 @@ Supports
 
 Notes
 =====
-	Do not use the umask= mount option on the underlying filesystem. 
-	posixovl assumes the default umask of 0022. Permissions will leak if
-	you do not follow this (e.g. files may have "a +w bit too much for your
-	security"). You do not need the umask= mount option on the underlying
-	filesystem! Giving write permission inside the posixovl mount is the
-	proper way.
+	Using posixovl on an already POSIX-behaving filesystem (e.g. XFS)
+	incurs some issues, since detecting whether a path is POSIX behaving
+	or not is difficult. Hence, the following decision was made:
+
+	* permissions will be set to the default permissions (see below) unless
+	  a HCB is found that can override these
+	* all lower-level files will be operated on/created with the user who
+	  inititated the mount
 
 	If no HCB exists for a file or directory, the default permissions are
 	644 and 755, respectively. The owner and group of the inode will be the

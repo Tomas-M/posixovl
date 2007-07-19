@@ -117,9 +117,9 @@ struct hcb {
 };
 
 /* Global */
+static mode_t default_mode = S_IRUGO | S_IWUSR;
 static const char *root_dir;
 static int root_fd;
-static unsigned int perform_setfsxid;
 static pthread_mutex_t posixovl_protect = PTHREAD_MUTEX_INITIALIZER;
 
 static inline int lock_read(int fd)
@@ -378,8 +378,11 @@ static int hcb_get(const char *path, struct hcb *cb)
 	/* Get inode number, size and times from the L0 file */
 	if (fstatat(root_fd, at(path), &cb->sb, AT_SYMLINK_NOFOLLOW) < 0)
 		return -errno;
-	if (!S_ISDIR(cb->sb.st_mode))
-		cb->sb.st_mode &= ~S_IXUGO;
+
+	cb->sb.st_mode &= S_IFMT;
+	cb->sb.st_mode |= default_mode;
+	if (S_ISDIR(cb->sb.st_mode))
+		cb->sb.st_mode |= S_IXUGO;
 
 	if ((ret = real_to_hcb(cb->path, path)) < 0)
 		return ret;
@@ -629,37 +632,6 @@ static __attribute__((pure)) inline bool is_resv(const char *path)
 }
 
 /*
- * setfsxid - set fsuid/fsgid to requester uid/gid
- */
-static inline const struct fuse_context *setfsxid(void)
-{
-	const struct fuse_context *ctx = fuse_get_context();
-	if (!perform_setfsxid)
-		return ctx;
-	if (setfsuid(ctx->uid) < 0 || setfsgid(ctx->gid) < 0)
-		perror("setfsxid");
-	return ctx;
-}
-
-/*
- * setfsuidp - set fsuid/fsgid to owner of @path
- * @path:	file
- */
-static inline void setfsuidp(const char *path)
-{
-	struct stat sb;
-	if (!perform_setfsxid)
-		return;
-	if (fstatat(root_fd, at(path), &sb, AT_SYMLINK_NOFOLLOW) < 0) {
-		perror("fstatat");
-		return;
-	}
-	if (setfsuid(sb.st_uid) < 0)
-		perror("setfsuidp");
-	return;
-}
-
-/*
  * supports_owners - check whether @path can do that
  * @path:	path to existing file
  * @uid:	uid to change to (used for figuring out)
@@ -765,7 +737,6 @@ static int posixovl_chmod(const char *path, mode_t mode)
 
 	if (is_resv(path))
 		return -ENOENT;
-	setfsxid();
 	ret = hcb_get_deref(path, &info);
 	if (ret == -ENOENT_HCB) {
 		if (supports_permissions(path))
@@ -789,7 +760,6 @@ static int posixovl_chown(const char *path, uid_t uid, gid_t gid)
 
 	if (is_resv(path))
 		return -ENOENT;
-	setfsxid();
 	ret = hcb_get_deref(path, &info);
 	if (ret == -ENOENT_HCB) {
 		if (supports_owners(path, uid, gid, 0))
@@ -855,7 +825,7 @@ static int posixovl_create(const char *path, mode_t mode,
 	if (could_be_too_long(path))
 		return -ENAMETOOLONG;
 
-	ctx = setfsxid();
+	ctx = fuse_get_context();
 	fd  = openat(root_fd, at(path), filp->flags, mode);
 	if (fd < 0)
 		return -errno;
@@ -863,14 +833,13 @@ static int posixovl_create(const char *path, mode_t mode,
 	filp->fh = fd;
 
 	/*
-	 * Assuming default umask 0022. Default file permissions 0644
-	 * do not trigger creation of a HCB.
+	 * Default file permissions do not trigger creation of a HCB.
 	 * We need (rather: want) a HCB if the fsuid is different from
 	 * the owner of the underlying mount, if owners are not
 	 * supported.
 	 * Fuse oddity: @mode includes S_IFREG (contraty to mkdir())
 	 */
-	if (((mode & ~S_IWUSR) != (S_IFREG | S_IRUGO) &&
+	if (((mode & ~S_IWUSR) != (S_IFREG | (default_mode & ~S_IWUSR)) &&
 	    !supports_permissions(path)) ||
 	    (!parent_owner_match(path, ctx->uid) &&
 	    !supports_owners(path, ctx->uid, ctx->gid, 1))) {
@@ -889,7 +858,6 @@ static int posixovl_create(const char *path, mode_t mode,
 static int posixovl_ftruncate(const char *path, off_t length,
     struct fuse_file_info *filp)
 {
-	setfsxid();
 	XRET(ftruncate(filp->fh, length));
 }
 
@@ -969,7 +937,6 @@ static int posixovl_getattr(const char *path, struct stat *sb)
 
 	if (is_resv(path))
 		return -ENOENT;
-	setfsxid();
 	ret = hcb_lookup_deref(path, &info);
 	if (ret < 0 && ret != -ENOENT_HCB && ret != -EACCES)
 		return ret;
@@ -1217,7 +1184,6 @@ static int posixovl_link(const char *oldpath, const char *newpath)
 	 * Kernel/FUSE already takes care of prohibiting hardlinking
 	 * directories. We never get to see these.
 	 */
-	setfsxid();
 	ret = linkat(root_fd, at(oldpath), root_fd, at(newpath), 0);
 	if (ret < 0 && errno != EPERM)
 		return ret;
@@ -1246,13 +1212,13 @@ static int posixovl_mkdir(const char *path, mode_t mode)
 	if (could_be_too_long(path))
 		return -ENAMETOOLONG;
 
-	ctx = setfsxid();
+	ctx = fuse_get_context();
 	ret = mkdirat(root_fd, at(path), mode);
 	if (ret < 0)
 		return -errno;
 
 	/* FUSE oddity: @mode does not include S_IFDIR */
-	if (((mode & ~S_IWUSR) != (S_IRUGO | S_IXUGO) &&
+	if (((mode & ~S_IWUSR) != ((default_mode & ~S_IWUSR) | S_IXUGO) &&
 	    !supports_permissions(path)) ||
 	    (!parent_owner_match(path, ctx->uid) &&
 	    !supports_owners(path, ctx->uid, ctx->gid, 1))) {
@@ -1277,7 +1243,7 @@ static int posixovl_mknod(const char *path, mode_t mode, dev_t rdev)
 	if (is_resv(path))
 		return -EPERM;
 
-	ctx = setfsxid();
+	ctx = fuse_get_context();
 	ret = mknodat(root_fd, at(path), mode, rdev);
 	if (ret < 0 && errno != EPERM)
 		return ret;
@@ -1316,7 +1282,6 @@ static int posixovl_open(const char *path, struct fuse_file_info *filp)
 	if (is_resv(path))
 		return -ENOENT;
 
-	setfsxid();
 	if ((filp->flags & O_ACCMODE) == O_WRONLY ||
 	    (filp->flags & O_ACCMODE) == O_RDWR)
 		if ((ret = hl_try_demote(path)) < 0)
@@ -1360,7 +1325,6 @@ static int posixovl_readdir(const char *path, void *buffer,
 		return -ENOENT;
 	if (could_be_too_long(path))
 		return -ENAMETOOLONG;
-	setfsxid();
 	/*
 	 * Current working directory is root_fd (per posixovl_init()).
 	 * Let's hope opendir(relative_path) works.
@@ -1391,7 +1355,6 @@ static int posixovl_readlink(const char *path, char *dest, size_t size)
 	if (is_resv(path))
 		return -ENOENT;
 
-	setfsxid();
 	ret = readlinkat(root_fd, at(path), dest, size);
 	if (ret < 0 && errno != EINVAL)
 		return ret;
@@ -1429,7 +1392,6 @@ static int posixovl_rename(const char *oldpath, const char *newpath)
 	if (could_be_too_long(oldpath) || could_be_too_long(newpath))
 		return -ENAMETOOLONG;
 
-	setfsxid();
 	ret = hcb_lookup(oldpath, &old_info);
 	if (ret == -ENOENT_HCB)
 		XRET(renameat(root_fd, at(oldpath), root_fd, at(newpath)));
@@ -1471,7 +1433,6 @@ static int posixovl_rmdir(const char *path)
 
 	if (is_resv(path))
 		return -ENOENT;
-	setfsxid();
 	ret = hcb_lookup(path, &info);
 	if (ret == 0 && unlinkat(root_fd, at(info.path), 0) < 0)
 		return -errno;
@@ -1486,7 +1447,6 @@ static int posixovl_setxattr(const char *path, const char *name,
 
 static int posixovl_statfs(const char *path, struct statvfs *sb)
 {
-	setfsxid();
 	if (fstatvfs(root_fd, sb) < 0)
 		return -errno;
 	sb->f_fsid = 0;
@@ -1502,7 +1462,7 @@ static int posixovl_symlink(const char *oldpath, const char *newpath)
 	if (is_resv(newpath))
 		return -EPERM;
 
-	ctx = setfsxid();
+	ctx = fuse_get_context();
 	ret = symlinkat(oldpath, root_fd, at(newpath));
 	if (ret < 0 && errno != EPERM)
 		return -errno;
@@ -1540,8 +1500,6 @@ static int posixovl_truncate(const char *path, off_t length)
 
 	if (is_resv(path))
 		return -ENOENT;
-
-	setfsxid();
 	if ((ret = hl_try_demote(path)) < 0)
 		return ret;
 
@@ -1590,7 +1548,6 @@ static int posixovl_unlink(const char *path)
 	 * "HCB non-existant but real file existant" does not happen in
 	 * readdir().
 	 */
-	setfsxid();
 	h_ret = hcb_lookup(path, &info);
 	if (h_ret < 0 && h_ret != -ENOENT_HCB)
 		return h_ret;
@@ -1625,11 +1582,6 @@ static int posixovl_utimens(const char *path, const struct timespec *ts)
 	tv[1].tv_sec  = ts[1].tv_sec;
 	tv[1].tv_usec = ts[1].tv_nsec / 1000;
 #endif
-
-	if (supports_owners(path, 0, 0, 1))
-		setfsxid();
-	else
-		setfsuidp(path);
 
 	ret = hcb_lookup(path, &info);
 	if (ret < 0 && ret != -ENOENT_HCB)
@@ -1749,8 +1701,7 @@ int main(int argc, char **argv)
 		new_argv[new_argc++] = "-ononempty";
 	}
 
-	perform_setfsxid = geteuid() == 0;
-	if (perform_setfsxid || user_allow_other())
+	if (user_allow_other())
 		new_argv[new_argc++] = "-oallow_other";
 
 	while (*aptr != NULL)
