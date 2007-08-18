@@ -1,6 +1,25 @@
 
-Installation when using an subversion snapshot:
+  Installation when using an subversion snapshot
+==================================================
 
-	./autogen.sh
-	./configure
-	make
+Requires:
+	autoconf, automake
+	# (plus anything below)
+
+Commands:
+	./autogen.sh;
+	# (plus anything below)
+
+
+  Installation when using a tarball
+=====================================
+
+Requires:
+	fuse-devel >= 2.6.5
+	libattr-devel
+
+Commands:
+	mkdir obj;
+	cd obj;
+	../configure;
+	make;

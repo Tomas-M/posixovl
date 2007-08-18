@@ -1,6 +1,8 @@
-AUTOMAKE_OPTIONS       = foreign
-AM_CFLAGS              = $(AC_CFLAGS)
+# -*- Makefile -*-
+
+AUTOMAKE_OPTIONS       = foreign subdir-objects
+AM_CFLAGS              = $(AC_CFLAGS) $(libfuse_CFLAGS)
 
 sbin_PROGRAMS          = mount.posixovl
 mount_posixovl_SOURCES = posixovl.c
-mount_posixovl_LDFLAGS = -lfuse
+mount_posixovl_LDADD   = $(libfuse_LIBS)
