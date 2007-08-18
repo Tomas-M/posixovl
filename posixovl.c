@@ -64,15 +64,15 @@
 			fprintf(stderr, "CRITICAL: Should NEVER happen! %s:%u\n", \
 			        __FILE__, __LINE__); \
 			abort(); \
-		} while (0)
+		} while (false)
 #	define should_not_happen() \
 		do { \
 			fprintf(stderr, "WARNING: Should not happen! %s:%u\n", \
 			        __FILE__, __LINE__); \
-		} while (0)
+		} while (false)
 #else
-#	define should_never_happen() do {} while(0)
-#	define should_not_happen()   do {} while(0)
+#	define should_never_happen() do {} while (false)
+#	define should_not_happen()   do {} while (false)
 #endif
 #define hcb_got_busted(path) \
 	fprintf(stderr, "HCB %s got busted\n", (path))
@@ -296,8 +296,8 @@ static int ll_hcb_read(const char *path, struct ll_hcb *info, int fd)
  */
 static int ll_hcb_write(const char *path, struct ll_hcb *info, int fd)
 {
+	ssize_t ret;
 	size_t z;
-	int ret;
 
 	if (lseek(fd, 0, SEEK_SET) < 0)
 		return -errno;
@@ -1008,7 +1008,7 @@ static int hl_promote(const char *l0_path, const struct hcb *orig_info,
 			/* ok, can use this ID */
 			break;
 		return -errno;
-	} while (1);
+	} while (true);
 
 	/* Move L0 to L1 */
 	ret = renameat(root_fd, at(l0_path), root_fd, at(l1_path));
