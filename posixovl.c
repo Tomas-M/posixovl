@@ -301,7 +301,8 @@ static int ll_hcb_write(const char *path, struct ll_hcb *info, int fd)
 
 	if (lseek(fd, 0, SEEK_SET) < 0)
 		return -errno;
-	ftruncate(fd, 0);
+	if (ftruncate(fd, 0) < 0)
+		should_not_happen();
 	ret = snprintf(info->buf, sizeof(info->buf), "%o %u %lu %lu %lu:%lu %s",
 	      static_cast(unsigned int, info->mode),
 	      static_cast(unsigned int, info->nlink),
@@ -695,8 +696,9 @@ static bool supports_owners(const char *path, uid_t uid,
 	}
 
 	if (restore)
-		fchownat(root_fd, at(path), orig_sb.st_uid,
-		         orig_sb.st_gid, AT_SYMLINK_NOFOLLOW);
+		if (fchownat(root_fd, at(path), orig_sb.st_uid,
+		    orig_sb.st_gid, AT_SYMLINK_NOFOLLOW) < 0)
+			should_not_happen();
 
 	return new_sb.st_uid != work_uid || new_sb.st_gid != work_gid;
 }
