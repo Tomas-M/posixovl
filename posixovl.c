@@ -764,7 +764,7 @@ static int posixovl_chown(const char *path, uid_t uid, gid_t gid)
 		return -ENOENT;
 	ret = hcb_get_deref(path, &info);
 	if (ret == -ENOENT_HCB) {
-		if (supports_owners(path, uid, gid, 0))
+		if (supports_owners(path, uid, gid, false))
 			XRET(fchownat(root_fd, at(path), uid, gid,
 			     AT_SYMLINK_NOFOLLOW));
 		if ((ret = hcb_new(path, &info, 1)) < 0)
@@ -844,7 +844,7 @@ static int posixovl_create(const char *path, mode_t mode,
 	if (((mode & ~S_IWUSR) != (S_IFREG | (default_mode & ~S_IWUSR)) &&
 	    !supports_permissions(path)) ||
 	    (!parent_owner_match(path, ctx->uid) &&
-	    !supports_owners(path, ctx->uid, ctx->gid, 1))) {
+	    !supports_owners(path, ctx->uid, ctx->gid, true))) {
 		if ((ret = hcb_new(path, &cb, 0)) < 0)
 			return 0;
 		/* nlink already set (hcb_new() stat'ed @path) */
@@ -1223,7 +1223,7 @@ static int posixovl_mkdir(const char *path, mode_t mode)
 	if (((mode & ~S_IWUSR) != ((default_mode & ~S_IWUSR) | S_IXUGO) &&
 	    !supports_permissions(path)) ||
 	    (!parent_owner_match(path, ctx->uid) &&
-	    !supports_owners(path, ctx->uid, ctx->gid, 1))) {
+	    !supports_owners(path, ctx->uid, ctx->gid, true))) {
 		if ((ret = hcb_new(path, &cb, 0)) < 0)
 			return 0;
 		/* nlink already set (hcb_new() stat'ed @path) */
