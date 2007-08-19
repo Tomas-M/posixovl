@@ -654,39 +654,32 @@ static bool supports_owners(const char *path, uid_t uid,
     gid_t gid, bool restore)
 {
 	struct stat orig_sb, new_sb;
-	uid_t work_uid = -1;
-	gid_t work_gid = -1;
+	uid_t work_uid;
+	gid_t work_gid;
 
 	if (fstatat(root_fd, at(path), &orig_sb, AT_SYMLINK_NOFOLLOW) < 0) {
 		perror("fstatat");
 		return 0;
 	}
 
-	/*
-	 * Some cases to consider:
-	 *  - No permission support and st_uid is 0:
-	 * => mounter uid is 0, @work_uid to change to must not be 0
-	 *  - No permission support and st_uid is not 0:
-	 * => mounter uid is not 0, change to 0 for test.
-	 *  - Permisson support:
-	 * => fchownat() will succeed
-	 */
-	if (uid != -1) {
-		if (orig_sb.st_uid != 0)
-			work_uid = 0;
-		else if (uid == 0)
-			work_uid = -2; /* let's hope it is unused */
-		else
-			work_uid = uid;
-	}
-	if (gid != -1) {
-		if (orig_sb.st_gid != 0)
-			work_gid = 0;
-		else if (gid == 0)
-			work_gid = -2;
-		else
-			work_gid = gid;
-	}
+	if (uid == -1)
+		work_uid = orig_sb.st_uid;
+	else if (orig_sb.st_uid != uid)
+		work_uid = uid;
+	else if (uid == 0)
+		work_uid = -2;
+	else
+		should_not_happen();
+
+	if (gid == -1)
+		work_gid = orig_sb.st_gid;
+	else if (orig_sb.st_gid != gid)
+		work_gid = gid;
+	else if (uid == 0)
+		work_gid = -2;
+	else
+		should_not_happen();
+
 	if (fchownat(root_fd, at(path), work_uid, work_gid,
 	    AT_SYMLINK_NOFOLLOW) < 0)
 		return 0;
@@ -700,7 +693,7 @@ static bool supports_owners(const char *path, uid_t uid,
 		    orig_sb.st_gid, AT_SYMLINK_NOFOLLOW) < 0)
 			should_not_happen();
 
-	return new_sb.st_uid != work_uid || new_sb.st_gid != work_gid;
+	return new_sb.st_uid == work_uid && new_sb.st_gid == work_gid;
 }
 
 /*
