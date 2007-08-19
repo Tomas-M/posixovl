@@ -1681,6 +1681,7 @@ int main(int argc, char **argv)
 	}
 
 	if (fstat(root_fd, &sb) < 0) {
+		/* somebody remind me why I added this.. */
 		perror("fstat");
 		abort();
 	}
