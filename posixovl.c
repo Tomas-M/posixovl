@@ -1677,13 +1677,13 @@ int main(int argc, char **argv)
 	if ((root_fd = open(root_dir, O_DIRECTORY)) < 0) {
 		fprintf(stderr, "Could not open(\"%s\"): %s\n",
 		        root_dir, strerror(errno));
-		abort();
+		return EXIT_FAILURE;
 	}
 
 	if (fstat(root_fd, &sb) < 0) {
 		/* somebody remind me why I added this.. */
 		perror("fstat");
-		abort();
+		return EXIT_FAILURE;
 	}
 
 	new_argv = malloc(sizeof(char *) * (argc + 4));
