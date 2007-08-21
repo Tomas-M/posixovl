@@ -1723,7 +1723,8 @@ int main(int argc, char **argv)
 
 	new_argv = malloc(sizeof(char *) * (argc + 4 - optind));
 	new_argv[new_argc++] = argv[0];
-	new_argv[new_argc++] = "-oattr_timeout=0,default_permissions,use_ino,fsname=posix-overlay";
+	new_argv[new_argc++] = "-oattr_timeout=0,default_permissions,use_ino,"
+	                       "nonempty,fsname=posix-overlay";
 
 	if (user_allow_other())
 		new_argv[new_argc++] = "-oallow_other";
