@@ -14,15 +14,6 @@ AC_SUBST(AC_CFLAGS)
 AC_CHECK_HEADER(attr/xattr.h, [], AC_MSG_ERROR([libattr-devel not installed]))
 PKG_CHECK_MODULES([libfuse], [fuse >= 2.6.5])
 
-AC_CHECK_HEADER([libHX.h], [],
-	AC_MSG_ERROR([Need at least libHX 1.10 (http://jengelh.hopto.org/p/libHX/)]),
-	[
-#include <libHX.h>
-#if !defined(_LIBHX_H) || _LIBHX_H < 20070701
-#	error You need a newer version of libHX (at least 1.10.0)
-#endif
-])
-
 # Minium requirements for utimensat(): Linux 2.6.22-rc1 and Glibc 2.6
 AC_MSG_CHECKING([for utimensat()])
 AC_COMPILE_IFELSE([

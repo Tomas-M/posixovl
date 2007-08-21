@@ -21,6 +21,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <fuse.h>
+#include <getopt.h>
 #include <limits.h>
 #include <pthread.h>
 #include <stdarg.h>
@@ -31,7 +32,6 @@
 #include <unistd.h>
 #include <asm/unistd.h>
 #include <attr/xattr.h>
-#include <libHX.h>
 #include "config.h"
 #ifndef S_IRUGO
 #	define S_IRUGO (S_IRUSR | S_IRGRP | S_IROTH)
@@ -1676,35 +1676,37 @@ static const struct fuse_operations posixovl_ops = {
 	.write       = posixovl_write,
 };
 
-int main(int argc, const char **argv)
+static void usage(const char *p)
 {
-	const char **aptr, **new_argv;
-	int new_argc = 0;
+	fprintf(stderr,
+	        "Usage: %s [-F] [-S source] mountpoint [-- fuseoptions]\n", p);
+	exit(EXIT_FAILURE);
+}
+
+int main(int argc, char **argv)
+{
+	char **aptr, **new_argv;
+	int new_argc = 0, c;
 	struct stat sb;
-	static struct HXoption options_table[] = {
-		{.sh = 'F', .type = HXTYPE_NONE, .ptr = &assume_vfat,
-		 .help = "Assume that the source directory has no non-POSIX "
-		 "submounts"},
-		{.sh = 'S', .type = HXTYPE_STRING, .ptr = &root_dir,
-		 .help = "Source directory (default: same as mountpoint)",
-		 .htyp = "DIR"},
-		HXOPT_AUTOHELP,
-		HXOPT_TABLEEND,
-	};
 
-	if (HX_getopt(options_table, &argc, &argv, HXOPT_USAGEONERR) <= 0)
-		return EXIT_FAILURE;
-
-	if (argc < 2) {
-		fprintf(stderr, "%s: missing mountpoint\n"
-		        "Usage: %s [options] MOUNTPOINT [-- fuseoptions]\n"
-		        "Try \"%s -?\" for option overview.\n",
-		        *argv, *argv, *argv);
-		return EXIT_FAILURE;
+	while ((c = getopt(argc, argv, "FS:")) > 0) {
+		switch (c) {
+			case 'F':
+				assume_vfat = true;
+				break;
+			case 'S':
+				root_dir = argv[optind];
+				break;
+			default:
+				usage(*argv);
+				return EXIT_FAILURE;
+		}
 	}
 
+	if (argv[optind] == NULL)
+		usage(*argv);
 	if (root_dir == NULL)
-		root_dir = argv[1];
+		root_dir = argv[optind];
 
 	umask(0);
 	if ((root_fd = open(root_dir, O_DIRECTORY)) < 0) {
@@ -1719,14 +1721,14 @@ int main(int argc, const char **argv)
 		return EXIT_FAILURE;
 	}
 
-	new_argv = malloc(sizeof(char *) * (argc + 3));
+	new_argv = malloc(sizeof(char *) * (argc + 4 - optind));
 	new_argv[new_argc++] = argv[0];
 	new_argv[new_argc++] = "-oattr_timeout=0,default_permissions,use_ino,fsname=posix-overlay";
 
 	if (user_allow_other())
 		new_argv[new_argc++] = "-oallow_other";
 
-	for (aptr = &argv[1]; *aptr != NULL; ++aptr)
+	for (aptr = &argv[optind]; *aptr != NULL; ++aptr)
 		new_argv[new_argc++] = *aptr;
 
 	new_argv[new_argc] = NULL;
