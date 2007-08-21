@@ -1695,7 +1695,7 @@ int main(int argc, char **argv)
 				assume_vfat = true;
 				break;
 			case 'S':
-				root_dir = argv[optind];
+				root_dir = optarg;
 				break;
 			default:
 				usage(*argv);
