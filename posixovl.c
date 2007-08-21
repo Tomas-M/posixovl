@@ -659,7 +659,7 @@ static bool supports_owners(const char *path, uid_t uid,
 
 	if (fstatat(root_fd, at(path), &orig_sb, AT_SYMLINK_NOFOLLOW) < 0) {
 		perror("fstatat");
-		return 0;
+		return false;
 	}
 
 	if (uid == -1)
@@ -682,10 +682,10 @@ static bool supports_owners(const char *path, uid_t uid,
 
 	if (fchownat(root_fd, at(path), work_uid, work_gid,
 	    AT_SYMLINK_NOFOLLOW) < 0)
-		return 0;
+		return false;
 	if (fstatat(root_fd, at(path), &new_sb, AT_SYMLINK_NOFOLLOW) < 0) {
 		perror("fstatat");
-		return 0;
+		return false;
 	}
 
 	if (restore)
@@ -702,7 +702,7 @@ static bool supports_owners(const char *path, uid_t uid,
  *
  * Does not restore the original mode.
  */
-static unsigned int supports_permissions(const char *path)
+static bool supports_permissions(const char *path)
 {
 	struct stat orig_sb, new_sb;
 	mode_t work_mode;
@@ -710,17 +710,17 @@ static unsigned int supports_permissions(const char *path)
 	if (fstatat(root_fd, at(path), &orig_sb, AT_SYMLINK_NOFOLLOW) < 0) {
 		/* literally BUG() */
 		perror("fstatat");
-		return 0;
+		return false;
 	}
 
 	/* Pick some magic */
 	work_mode = (orig_sb.st_mode ^ S_IRUSR ^ S_IXGRP) & ~S_IROTH;
 
 	if (fchmodat(root_fd, at(path), work_mode, AT_SYMLINK_NOFOLLOW) < 0)
-		return 0;
+		return false;
 	if (fstatat(root_fd, at(path), &new_sb, AT_SYMLINK_NOFOLLOW) < 0) {
 		perror("fstatat");
-		return 0;
+		return false;
 	}
 	return new_sb.st_mode == work_mode;
 }
@@ -802,7 +802,7 @@ static inline bool parent_owner_match(const char *path, uid_t uid)
 	ret = fstatat(root_fd, at(path), &sb, AT_SYMLINK_NOFOLLOW);
 	if (ret < 0) {
 		should_not_happen();
-		return 0;
+		return false;
 	}
 
 	return sb.st_uid == uid;
