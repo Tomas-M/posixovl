@@ -1,10 +1,14 @@
 
 Usage
 =====
-	mount.posixovl [/source_dir] /target_dir [fuseopts]
+	mount.posixovl [-F] [-S source_dir] /target_dir [-- fuseopts]
 
-	If no /source_dir is given, /target_dir specifies both source and
-	target, yielding an "overmount".
+	If no source directory is given, the target_dir specifies both source
+	and target (mountpoint), yielding an "overmount".
+
+	-F will disable permission and ownership checks that would be
+	required in case you have a POSIX mount over VFAT. (For example,
+	where /vfat is vfat, and /vfat/xfs is a POSIX-behaving filesystem.)
 
 Supports
 ========

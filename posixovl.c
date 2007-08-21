@@ -31,6 +31,7 @@
 #include <unistd.h>
 #include <asm/unistd.h>
 #include <attr/xattr.h>
+#include <libHX.h>
 #include "config.h"
 #ifndef S_IRUGO
 #	define S_IRUGO (S_IRUSR | S_IRGRP | S_IROTH)
@@ -118,6 +119,7 @@ struct hcb {
 
 /* Global */
 static mode_t default_mode = S_IRUGO | S_IWUSR;
+static unsigned int assume_vfat;
 static const char *root_dir;
 static int root_fd;
 static pthread_mutex_t posixovl_protect = PTHREAD_MUTEX_INITIALIZER;
@@ -650,7 +652,7 @@ static __attribute__((pure)) inline bool is_resv(const char *path)
  * always succeed (or always fail), because the kernel checks for
  * capability rather than FSUID. (Good thing.)
  */
-static bool supports_owners(const char *path, uid_t uid,
+static bool __supports_owners(const char *path, uid_t uid,
     gid_t gid, bool restore)
 {
 	struct stat orig_sb, new_sb;
@@ -696,13 +698,21 @@ static bool supports_owners(const char *path, uid_t uid,
 	return new_sb.st_uid == work_uid && new_sb.st_gid == work_gid;
 }
 
+static inline bool supports_owners(const char *path, uid_t uid,
+    gid_t gid, bool restore)
+{
+	if (assume_vfat)
+		return false;
+	return __supports_owners(path, uid, gid, restore);
+}
+
 /*
  * supports_permissions - check whether @path can do that
  * @path:	existing path to file
  *
  * Does not restore the original mode.
  */
-static bool supports_permissions(const char *path)
+static bool __supports_permissions(const char *path)
 {
 	struct stat orig_sb, new_sb;
 	mode_t work_mode;
@@ -723,6 +733,13 @@ static bool supports_permissions(const char *path)
 		return false;
 	}
 	return new_sb.st_mode == work_mode;
+}
+
+static inline bool supports_permissions(const char *path)
+{
+	if (assume_vfat)
+		return false;
+	return __supports_permissions(path);
 }
 
 static int posixovl_chmod(const char *path, mode_t mode)
@@ -1659,17 +1676,36 @@ static const struct fuse_operations posixovl_ops = {
 	.write       = posixovl_write,
 };
 
-int main(int argc, char **argv)
+int main(int argc, const char **argv)
 {
-	char **aptr, **new_argv;
+	const char **aptr, **new_argv;
 	int new_argc = 0;
 	struct stat sb;
+	static struct HXoption options_table[] = {
+		{.sh = 'F', .type = HXTYPE_NONE, .ptr = &assume_vfat,
+		 .help = "Assume that the source directory has no non-POSIX "
+		 "submounts"},
+		{.sh = 'S', .type = HXTYPE_STRING, .ptr = &root_dir,
+		 .help = "Source directory (default: same as mountpoint)",
+		 .htyp = "DIR"},
+		HXOPT_AUTOHELP,
+		HXOPT_TABLEEND,
+	};
+
+	if (HX_getopt(options_table, &argc, &argv, HXOPT_USAGEONERR) <= 0)
+		return EXIT_FAILURE;
 
 	if (argc < 2) {
-		fprintf(stderr, "Usage: %s [/source_dir] /target_dir [fuseopts]\n", *argv);
+		fprintf(stderr, "%s: missing mountpoint\n"
+		        "Usage: %s [options] MOUNTPOINT [-- fuseoptions]\n"
+		        "Try \"%s -?\" for option overview.\n",
+		        *argv, *argv, *argv);
 		return EXIT_FAILURE;
 	}
-	root_dir = argv[1];
+
+	if (root_dir == NULL)
+		root_dir = argv[1];
+
 	umask(0);
 	if ((root_fd = open(root_dir, O_DIRECTORY)) < 0) {
 		fprintf(stderr, "Could not open(\"%s\"): %s\n",
@@ -1683,23 +1719,16 @@ int main(int argc, char **argv)
 		return EXIT_FAILURE;
 	}
 
-	new_argv = malloc(sizeof(char *) * (argc + 4));
+	new_argv = malloc(sizeof(char *) * (argc + 3));
 	new_argv[new_argc++] = argv[0];
 	new_argv[new_argc++] = "-oattr_timeout=0,default_permissions,use_ino,fsname=posix-overlay";
-
-	if (argc >= 3 && *argv[2] != '-') {
-		aptr = &argv[2];
-	} else if (argc >= 2) {
-	        aptr = &argv[1];
-		new_argv[new_argc++] = "-ononempty";
-	}
 
 	if (user_allow_other())
 		new_argv[new_argc++] = "-oallow_other";
 
-	while (*aptr != NULL)
-		new_argv[new_argc++] = *aptr++;
-	new_argv[new_argc] = NULL;
+	for (aptr = &argv[1]; *aptr != NULL; ++aptr)
+		new_argv[new_argc++] = *aptr;
 
-	return fuse_main(new_argc, new_argv, &posixovl_ops, NULL);
+	new_argv[new_argc] = NULL;
+	return fuse_main(new_argc, (char **)new_argv, &posixovl_ops, NULL);
 }
