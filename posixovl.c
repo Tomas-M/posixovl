@@ -781,9 +781,8 @@ static int posixovl_close(const char *path, struct fuse_file_info *filp)
 
 static __attribute__((pure)) inline bool could_be_too_long(const char *path)
 {
-	/* Longest possible case is S_ISDIR: /root/path/.pxovl. */
-	return strlen(root_dir) + strlen(path) +
-	       1 + HCB_PREFIX_LEN >= PATH_MAX;
+	/* Longest possible case is S_ISDIR: /path/.pxovl. */
+	return strlen(path) + 1 + HCB_PREFIX_LEN >= PATH_MAX;
 }
 
 /*
@@ -1318,8 +1317,6 @@ static int posixovl_readdir(const char *path, void *buffer,
 
 	if (is_resv(path))
 		return -ENOENT;
-	if (could_be_too_long(path))
-		return -ENAMETOOLONG;
 	/*
 	 * Current working directory is root_fd (per posixovl_init()).
 	 * Let's hope opendir(relative_path) works.
@@ -1384,7 +1381,7 @@ static int posixovl_rename(const char *oldpath, const char *newpath)
 		return -ENOENT;
 	if (is_resv(newpath))
 		return -EPERM;
-	if (could_be_too_long(oldpath) || could_be_too_long(newpath))
+	if (could_be_too_long(newpath))
 		return -ENAMETOOLONG;
 
 	ret = hcb_lookup(oldpath, &old_info);
