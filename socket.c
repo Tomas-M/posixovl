@@ -14,7 +14,7 @@ int main(int argc, const char **argv)
 	struct sockaddr_un sock1, sock2, sock_c;
 	const char *path1, *path2;
 	int fd1, fd2, fdc, ret;
-	socklen_t socklen;
+	socklen_t socklen = sizeof(sock_c);
 	char buf[80];
 
 	if (argc < 3) {
