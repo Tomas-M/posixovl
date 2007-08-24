@@ -742,6 +742,23 @@ static inline bool supports_permissions(const char *path)
 	return __supports_permissions(path);
 }
 
+static char *xfrm_to_disk(const char *in)
+{
+	char *w, *out = strdup(in);
+	for (w = out; *w != '\0'; ++w)
+		if (*w == ':')
+			*w = ';';
+	return out;
+}
+
+static void xfrm_from_disk(char *in)
+{
+	for (; *in != '\0'; ++in)
+		if (*in == ';')
+			*in = ':';
+	return;
+}
+
 static int posixovl_chmod(const char *path, mode_t mode)
 {
 	struct hcb info;
@@ -763,6 +780,14 @@ static int posixovl_chmod(const char *path, mode_t mode)
 
 	info.ll.mode = mode;
 	return hcb_update(&info);
+}
+
+static int posixovl1_chmod(const char *path, mode_t mode)
+{
+	char *xpath = xfrm_to_disk(path);
+	int ret     = posixovl_chmod(xpath, mode);
+	free(xpath);
+	return ret;
 }
 
 static int posixovl_chown(const char *path, uid_t uid, gid_t gid)
@@ -789,6 +814,14 @@ static int posixovl_chown(const char *path, uid_t uid, gid_t gid)
 	if (gid != (gid_t)-1)
 		info.ll.gid = gid;
 	return hcb_update(&info);
+}
+
+static int posixovl1_chown(const char *path, uid_t uid, gid_t gid)
+{
+	char *xpath = xfrm_to_disk(path);
+	int ret     = posixovl_chown(xpath, uid, gid);
+	free(xpath);
+	return ret;
 }
 
 static int posixovl_close(const char *path, struct fuse_file_info *filp)
@@ -864,6 +897,15 @@ static int posixovl_create(const char *path, mode_t mode,
 	}
 
 	return 0;
+}
+
+static int posixovl1_create(const char *path, mode_t mode,
+    struct fuse_file_info *filp)
+{
+	char *xpath = xfrm_to_disk(path);
+	int ret     = posixovl_create(xpath, mode, filp);
+	free(xpath);
+	return ret;
 }
 
 static int posixovl_ftruncate(const char *path, off_t length,
@@ -953,6 +995,14 @@ static int posixovl_getattr(const char *path, struct stat *sb)
 		return ret;
 	memcpy(sb, &info.sb, sizeof(*sb));
 	return 0;
+}
+
+static int posixovl1_getattr(const char *path, struct stat *sb)
+{
+	char *xpath = xfrm_to_disk(path);
+	int ret     = posixovl_getattr(xpath, sb);
+	free(xpath);
+	return ret;
 }
 
 static int posixovl_getxattr(const char *path, const char *name,
@@ -1207,6 +1257,16 @@ static int posixovl_link(const char *oldpath, const char *newpath)
 	return ret;
 }
 
+static int posixovl1_link(const char *oldpath, const char *newpath)
+{
+	char *xoldpath = xfrm_to_disk(oldpath);
+	char *xnewpath = xfrm_to_disk(newpath);
+	int ret        = posixovl_link(xoldpath, xnewpath);
+	free(xoldpath);
+	free(xnewpath);
+	return ret;
+}
+
 static int posixovl_listxattr(const char *path, char *list, size_t size)
 {
 	XRET(llistxattr(at(path), list, size));
@@ -1243,6 +1303,14 @@ static int posixovl_mkdir(const char *path, mode_t mode)
 	}
 
 	return 0;
+}
+
+static int posixovl1_mkdir(const char *path, mode_t mode)
+{
+	char *xpath = xfrm_to_disk(path);
+	int ret     = posixovl_mkdir(xpath, mode);
+	free(xpath);
+	return ret;
 }
 
 static int posixovl_mknod(const char *path, mode_t mode, dev_t rdev)
@@ -1285,6 +1353,14 @@ static int posixovl_mknod(const char *path, mode_t mode, dev_t rdev)
 	return ret;
 }
 
+static int posixovl1_mknod(const char *path, mode_t mode, dev_t rdev)
+{
+	char *xpath = xfrm_to_disk(path);
+	int ret     = posixovl_mknod(xpath, mode, rdev);
+	free(xpath);
+	return ret;
+}
+
 static int posixovl_open(const char *path, struct fuse_file_info *filp)
 {
 	struct hcb info;
@@ -1315,6 +1391,14 @@ static int posixovl_open(const char *path, struct fuse_file_info *filp)
 
 	filp->fh = fd;
 	return 0;
+}
+
+static int posixovl1_open(const char *path, struct fuse_file_info *filp)
+{
+	char *xpath = xfrm_to_disk(path);
+	int ret     = posixovl_open(xpath, filp);
+	free(xpath);
+	return ret;
 }
 
 static int posixovl_read(const char *path, char *buffer, size_t size,
@@ -1348,11 +1432,21 @@ static int posixovl_readdir(const char *path, void *buffer,
 		if (ret < 0 && ret != -ENOENT_HCB && ret != -EACCES)
 			break;
 		ret = 0;
+		xfrm_from_disk((char *)dentry->d_name);
 		if ((*filldir)(buffer, dentry->d_name, &info.sb, 0) > 0)
 			break;
 	}
 
 	closedir(ptr);
+	return ret;
+}
+
+static int posixovl1_readdir(const char *path, void *buffer,
+    fuse_fill_dir_t filldir, off_t offset, struct fuse_file_info *filp)
+{
+	char *xpath = xfrm_to_disk(path);
+	int ret     = posixovl_readdir(xpath, buffer, filldir, offset, filp);
+	free(xpath);
 	return ret;
 }
 
@@ -1381,6 +1475,14 @@ static int posixovl_readlink(const char *path, char *dest, size_t size)
 	memset(dest, 0, size);
 	strlcpy(dest, info.ll.target, size);
 	return 0;
+}
+
+static int posixovl1_readlink(const char *path, char *dest, size_t size)
+{
+	char *xpath = xfrm_to_disk(path);
+	int ret     = posixovl_readlink(xpath, dest, size);
+	free(xpath);
+	return ret;
 }
 
 static int posixovl_removexattr(const char *path, const char *name)
@@ -1435,6 +1537,16 @@ static int posixovl_rename(const char *oldpath, const char *newpath)
 	return 0;
 }
 
+static int posixovl1_rename(const char *oldpath, const char *newpath)
+{
+	char *xoldpath = xfrm_to_disk(oldpath);
+	char *xnewpath = xfrm_to_disk(newpath);
+	int ret        = posixovl_rename(xoldpath, xnewpath);
+	free(xoldpath);
+	free(xnewpath);
+	return ret;
+}
+
 static int posixovl_rmdir(const char *path)
 {
 	struct hcb info;
@@ -1446,6 +1558,14 @@ static int posixovl_rmdir(const char *path)
 	if (ret == 0 && unlinkat(root_fd, at(info.path), 0) < 0)
 		return -errno;
 	XRET(unlinkat(root_fd, at(path), AT_REMOVEDIR));
+}
+
+static int posixovl1_rmdir(const char *path)
+{
+	char *xpath = xfrm_to_disk(path);
+	int ret     = posixovl_rmdir(xpath);
+	free(xpath);
+	return ret;
 }
 
 static int posixovl_setxattr(const char *path, const char *name,
@@ -1502,6 +1622,16 @@ static int posixovl_symlink(const char *oldpath, const char *newpath)
 	return ret;
 }
 
+static int posixovl1_symlink(const char *oldpath, const char *newpath)
+{
+	char *xoldpath = xfrm_to_disk(oldpath);
+	char *xnewpath = xfrm_to_disk(newpath);
+	int ret        = posixovl_symlink(xoldpath, xnewpath);
+	free(xoldpath);
+	free(xnewpath);
+	return ret;
+}
+
 static int posixovl_truncate(const char *path, off_t length)
 {
 	struct hcb info;
@@ -1544,6 +1674,14 @@ static int posixovl_truncate(const char *path, off_t length)
 	return ret;
 }
 
+static int posixovl1_truncate(const char *path, off_t len)
+{
+	char *xpath = xfrm_to_disk(path);
+	int ret     = posixovl_truncate(xpath, len);
+	free(xpath);
+	return ret;
+}
+
 static int posixovl_unlink(const char *path)
 {
 	struct hcb info;
@@ -1572,6 +1710,14 @@ static int posixovl_unlink(const char *path)
 	}
 
 	return 0;
+}
+
+static int posixovl1_unlink(const char *path)
+{
+	char *xpath = xfrm_to_disk(path);
+	int ret     = posixovl_unlink(xpath);
+	free(xpath);
+	return ret;
 }
 
 static int posixovl_utimens(const char *path, const struct timespec *ts)
@@ -1619,6 +1765,14 @@ static int posixovl_utimens(const char *path, const struct timespec *ts)
 	XRET(ret);
 }
 
+static int posixovl1_utimens(const char *path, const struct timespec *ts)
+{
+	char *xpath = xfrm_to_disk(path);
+	int ret     = posixovl_utimens(xpath, ts);
+	free(xpath);
+	return ret;
+}
+
 static int posixovl_write(const char *path, const char *buffer, size_t size,
     off_t offset, struct fuse_file_info *filp)
 {
@@ -1647,32 +1801,32 @@ static bool user_allow_other(void)
 }
 
 static const struct fuse_operations posixovl_ops = {
-	.chmod       = posixovl_chmod,
-	.chown       = posixovl_chown,
-	.create      = posixovl_create,
+	.chmod       = posixovl1_chmod,
+	.chown       = posixovl1_chown,
+	.create      = posixovl1_create,
 	.fgetattr    = posixovl_fgetattr,
 	.ftruncate   = posixovl_ftruncate,
-	.getattr     = posixovl_getattr,
+	.getattr     = posixovl1_getattr,
 	.getxattr    = posixovl_getxattr,
 	.init        = posixovl_init,
-	.link        = posixovl_link,
+	.link        = posixovl1_link,
 	.listxattr   = posixovl_listxattr,
-	.mkdir       = posixovl_mkdir,
-	.mknod       = posixovl_mknod,
-	.open        = posixovl_open,
+	.mkdir       = posixovl1_mkdir,
+	.mknod       = posixovl1_mknod,
+	.open        = posixovl1_open,
 	.read        = posixovl_read,
-	.readdir     = posixovl_readdir,
-	.readlink    = posixovl_readlink,
+	.readdir     = posixovl1_readdir,
+	.readlink    = posixovl1_readlink,
 	.release     = posixovl_close,
 	.removexattr = posixovl_removexattr,
-	.rename      = posixovl_rename,
-	.rmdir       = posixovl_rmdir,
+	.rename      = posixovl1_rename,
+	.rmdir       = posixovl1_rmdir,
 	.setxattr    = posixovl_setxattr,
 	.statfs      = posixovl_statfs,
-	.symlink     = posixovl_symlink,
-	.truncate    = posixovl_truncate,
-	.unlink      = posixovl_unlink,
-	.utimens     = posixovl_utimens,
+	.symlink     = posixovl1_symlink,
+	.truncate    = posixovl1_truncate,
+	.unlink      = posixovl1_unlink,
+	.utimens     = posixovl1_utimens,
 	.write       = posixovl_write,
 };
 
