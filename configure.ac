@@ -12,7 +12,15 @@ AC_CFLAGS="-D_FORTIFY_SOURCE=2 -D_LARGEFILE_SOURCE=1 -D_LARGE_FILES \
 AC_SUBST(AC_CFLAGS)
 
 AC_CHECK_HEADER(attr/xattr.h, [], AC_MSG_ERROR([libattr-devel not installed]))
-PKG_CHECK_MODULES([libfuse], [fuse >= 2.6.5])
+
+# FUSE >= 2.7.0 got subtype name support.
+# 2.6.5 does not, but has a similar thing.
+PKG_CHECK_MODULES([libfuse], [fuse >= 2.7.0], [], [
+	PKG_CHECK_MODULES([libfuse], [fuse >= 2.6.5], [
+		AC_DEFINE([HAVE_JUST_FUSE_2_6_5], [1],
+			[Define if you have a FUSE version >= 2.6.5 but < 2.7.0])
+	])
+])
 
 # Minium requirements for utimensat(): Linux 2.6.22-rc1 and Glibc 2.6
 AC_MSG_CHECKING([for utimensat()])

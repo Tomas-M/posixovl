@@ -1723,8 +1723,13 @@ int main(int argc, char **argv)
 
 	new_argv = malloc(sizeof(char *) * (argc + 4 - optind));
 	new_argv[new_argc++] = argv[0];
+#ifdef HAVE_JUST_FUSE_2_6_5
 	new_argv[new_argc++] = "-oattr_timeout=0,default_permissions,use_ino,"
 	                       "nonempty,fsname=posix-overlay";
+#else
+	new_argv[new_argc++] = "-oattr_timeout=0,default_permissions,use_ino,"
+	                       "nonempty,fsname=posix-overlay,subtype=posixovl";
+#endif
 
 	if (user_allow_other())
 		new_argv[new_argc++] = "-oallow_other";
