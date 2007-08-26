@@ -1687,6 +1687,7 @@ int main(int argc, char **argv)
 {
 	char **aptr, **new_argv;
 	int new_argc = 0, c;
+	char xargs[256];
 	struct stat sb;
 
 	while ((c = getopt(argc, argv, "FS:")) > 0) {
@@ -1724,12 +1725,15 @@ int main(int argc, char **argv)
 	new_argv = malloc(sizeof(char *) * (argc + 4 - optind));
 	new_argv[new_argc++] = argv[0];
 #ifdef HAVE_JUST_FUSE_2_6_5
-	new_argv[new_argc++] = "-oattr_timeout=0,default_permissions,use_ino,"
-	                       "nonempty,fsname=posix-overlay";
+	snprintf(xargs, sizeof(xargs),
+	         "-oattr_timeout=0,default_permissions,use_ino,nonempty,"
+	         "fsname=posix-overlay(%s)", root_dir);
 #else
-	new_argv[new_argc++] = "-oattr_timeout=0,default_permissions,use_ino,"
-	                       "nonempty,fsname=posix-overlay,subtype=posixovl";
+	snprintf(xargs, sizeof(xargs),
+	         "-oattr_timeout=0,default_permissions,use_ino,nonempty,"
+	         "fsname=posix-overlay(%s),subtype=posixovl", root_dir);
 #endif
+	new_argv[new_argc++] = xargs;
 
 	if (user_allow_other())
 		new_argv[new_argc++] = "-oallow_other";
