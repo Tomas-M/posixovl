@@ -1726,11 +1726,11 @@ int main(int argc, char **argv)
 	new_argv[new_argc++] = argv[0];
 #ifdef HAVE_JUST_FUSE_2_6_5
 	snprintf(xargs, sizeof(xargs),
-	         "-oattr_timeout=0,default_permissions,use_ino,nonempty,"
+	         "-oattr_timeout=0,default_permissions,use_ino,nonempty,dev,"
 	         "fsname=posix-overlay(%s)", root_dir);
 #else
 	snprintf(xargs, sizeof(xargs),
-	         "-oattr_timeout=0,default_permissions,use_ino,nonempty,"
+	         "-oattr_timeout=0,default_permissions,use_ino,nonempty,dev,"
 	         "fsname=posix-overlay(%s),subtype=posixovl", root_dir);
 #endif
 	new_argv[new_argc++] = xargs;
