@@ -37,5 +37,6 @@ Notes
 	`df` will show:
 	$ df -Tah
 	Filesystem    Type    Size  Used Avail Use% Mounted on
-	/dev/hda5     vfat    5.9G  2.1G  3.9G  35% /D
-	posix-overlay fuse    5.9G  2.1G  3.9G  35% /D
+	/dev/hda5     vfat    5.9G  2.1G  3.9G  35% /windows/D
+	posix-overlay(/windows/D)
+	     fuse.posixovl    5.9G  2.1G  3.9G  35% /windows/D
