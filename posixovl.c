@@ -1364,11 +1364,13 @@ static int posixovl_readlink(const char *path, char *dest, size_t size)
 	if (is_resv(path))
 		return -ENOENT;
 
-	ret = readlinkat(root_fd, at(path), dest, size);
-	if (ret < 0 && errno != EINVAL)
+	ret = readlinkat(root_fd, at(path), dest, size - 1);
+	if (ret < 0 && errno != EINVAL) {
 		return ret;
-	else if (ret >= 0)
+	} else if (ret >= 0) {
+		dest[ret] = '\0';
 		return 0;
+	}
 
 	ret = hcb_lookup_deref(path, &info);
 	if (ret == -ENOENT_HCB)
