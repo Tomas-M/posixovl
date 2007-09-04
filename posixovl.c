@@ -119,7 +119,7 @@ struct hcb {
 
 /* Global */
 static mode_t default_mode = S_IRUGO | S_IWUSR;
-static unsigned int assume_vfat;
+static unsigned int assume_vfat, single_threaded;
 static const char *root_dir;
 static int root_fd;
 static pthread_mutex_t posixovl_protect = PTHREAD_MUTEX_INITIALIZER;
@@ -132,6 +132,8 @@ static inline int lock_read(int fd)
 		.l_start  = 0,
 		.l_len    = 0,
 	};
+	if (single_threaded)
+		return 0;
 	return fcntl(fd, F_SETLK, &fl);
 }
 
@@ -143,6 +145,8 @@ static inline int lock_write(int fd)
 		.l_start  = 0,
 		.l_len    = 0,
 	};
+	if (single_threaded)
+		return 0;
 	return fcntl(fd, F_SETLK, &fl);
 }
 
@@ -1694,8 +1698,11 @@ int main(int argc, char **argv)
 	char xargs[256];
 	struct stat sb;
 
-	while ((c = getopt(argc, argv, "FS:")) > 0) {
+	while ((c = getopt(argc, argv, "1FS:")) > 0) {
 		switch (c) {
+			case '1':
+				single_threaded = true;
+				break;
 			case 'F':
 				assume_vfat = true;
 				break;
@@ -1726,7 +1733,7 @@ int main(int argc, char **argv)
 		return EXIT_FAILURE;
 	}
 
-	new_argv = malloc(sizeof(char *) * (argc + 4 - optind));
+	new_argv = malloc(sizeof(char *) * (argc + 5 - optind));
 	new_argv[new_argc++] = argv[0];
 #ifdef HAVE_JUST_FUSE_2_6_5
 	snprintf(xargs, sizeof(xargs),
@@ -1741,6 +1748,8 @@ int main(int argc, char **argv)
 
 	if (user_allow_other())
 		new_argv[new_argc++] = "-oallow_other";
+	if (single_threaded)
+		new_argv[new_argc++] = "-s";
 
 	for (aptr = &argv[optind]; *aptr != NULL; ++aptr)
 		new_argv[new_argc++] = *aptr;
