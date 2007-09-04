@@ -1195,11 +1195,13 @@ static int posixovl_link(const char *oldpath, const char *newpath)
 	 * Kernel/FUSE already takes care of prohibiting hardlinking
 	 * directories. We never get to see these.
 	 */
-	ret = linkat(root_fd, at(oldpath), root_fd, at(newpath), 0);
-	if (ret < 0 && errno != EPERM)
-		return ret;
-	else if (ret >= 0)
-		return 0;
+	if (!assume_vfat) {
+		ret = linkat(root_fd, at(oldpath), root_fd, at(newpath), 0);
+		if (ret < 0 && errno != EPERM)
+			return ret;
+		else if (ret >= 0)
+			return 0;
+	}
 
 	pthread_mutex_lock(&posixovl_protect);
 	ret = hl_instantiate(oldpath, newpath);
