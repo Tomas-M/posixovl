@@ -1415,7 +1415,7 @@ static int posixovl_rename(const char *oldpath, const char *newpath)
 		return -ENAMETOOLONG;
 
 	ret = hcb_lookup(oldpath, &old_info);
-	if (ret == -ENOENT_HCB)
+	if (ret == -ENOENT_HCB || S_ISDIR(old_info.sb.st_mode))
 		XRET(renameat(root_fd, at(oldpath), root_fd, at(newpath)));
 	else if (ret < 0)
 		return ret;
