@@ -1138,6 +1138,7 @@ static int hl_instantiate(const char *oldpath, const char *newpath)
 	struct hcb cb_old, cb_new;
 	int fd, ret;
 
+	pthread_mutex_lock(&posixovl_protect);
 	ret = hcb_lookup(oldpath, &cb_old);
 	if (ret == -ENOENT_HCB || (ret == 0 && !S_ISHARDLNK(cb_old.ll.mode))) {
 		/*
@@ -1145,15 +1146,18 @@ static int hl_instantiate(const char *oldpath, const char *newpath)
 		 */
 		if ((ret = hl_promote(oldpath, &cb_old,
 		    ret != -ENOENT_HCB)) < 0)
-			return ret;
+			goto unlock_and_out;
 		/*
 		 * Relookup to get the L1 file path
 		 */
 		if ((ret = hcb_lookup(oldpath, &cb_old)) < 0)
-			return ret;
+			goto unlock_and_out;
 	} else if (ret < 0) {
+		pthread_mutex_unlock(&posixovl_protect);
 		return -errno;
 	}
+
+	pthread_mutex_unlock(&posixovl_protect);
 
 	/* now we can do the Nth link */
 	if ((ret = hl_up_nlink(cb_old.ll.target)) < 0)
@@ -1182,6 +1186,10 @@ static int hl_instantiate(const char *oldpath, const char *newpath)
  out:
 	hl_drop(cb_old.ll.target);
 	return ret;
+
+ unlock_and_out:
+	pthread_mutex_unlock(&posixovl_protect);
+	return ret;
 }
 
 static int posixovl_link(const char *oldpath, const char *newpath)
@@ -1207,10 +1215,7 @@ static int posixovl_link(const char *oldpath, const char *newpath)
 			return 0;
 	}
 
-	pthread_mutex_lock(&posixovl_protect);
-	ret = hl_instantiate(oldpath, newpath);
-	pthread_mutex_unlock(&posixovl_protect);
-	return ret;
+	return hl_instantiate(oldpath, newpath);
 }
 
 static int posixovl_listxattr(const char *path, char *list, size_t size)
