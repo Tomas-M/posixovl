@@ -283,6 +283,8 @@ static int ll_hcb_read(const char *path, struct ll_hcb *info, int fd)
 		goto busted;
 	++toul_ptr;
 	info->rdev = COMPAT_MKDEV(info->rdev, strtoul(toul_ptr, NULL, 0));
+	strncpy(info->new_target, info->target, sizeof(info->new_target));
+	info->new_target[sizeof(info->new_target)-1] = '\0';
 
 	return 0;
 
