@@ -134,7 +134,7 @@ static inline int lock_read(int fd)
 	};
 	if (single_threaded)
 		return 0;
-	return fcntl(fd, F_SETLK, &fl);
+	return fcntl(fd, F_SETLKW, &fl);
 }
 
 static inline int lock_write(int fd)
