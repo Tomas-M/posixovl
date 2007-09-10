@@ -1331,8 +1331,7 @@ static int posixovl_open(const char *path, struct fuse_file_info *filp)
 static int posixovl_read(const char *path, char *buffer, size_t size,
     off_t offset, struct fuse_file_info *filp)
 {
-	lseek(filp->fh, offset, SEEK_SET);
-	XRET(read(filp->fh, buffer, size));
+	XRET(pread(filp->fh, buffer, size, offset));
 }
 
 static int posixovl_readdir(const char *path, void *buffer,
@@ -1635,8 +1634,7 @@ static int posixovl_utimens(const char *path, const struct timespec *ts)
 static int posixovl_write(const char *path, const char *buffer, size_t size,
     off_t offset, struct fuse_file_info *filp)
 {
-	lseek(filp->fh, offset, SEEK_SET);
-	XRET(write(filp->fh, buffer, size));
+	XRET(pwrite(filp->fh, buffer, size, offset));
 }
 
 static bool user_allow_other(void)
