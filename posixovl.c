@@ -1,6 +1,7 @@
 /*
  *	posixovl - POSIX overlay filesystem
- *	Copyright © Jan Engelhardt <jengelh@computergmbh.de>, 2007
+ *	Copyright © CC Computer Consultants GmbH, 2007
+ *	Contact: Jan Engelhardt <jengelh [at] computergmbh de>
  *
  *	Development of posixovl sponsored by Slax (http://www.slax.org/)
  *
