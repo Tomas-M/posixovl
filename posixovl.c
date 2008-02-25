@@ -1700,7 +1700,7 @@ static void usage(const char *p)
 int main(int argc, char **argv)
 {
 	char **aptr, **new_argv;
-	int new_argc = 0, c;
+	int new_argc = 0, original_wd, c;
 	char xargs[256];
 	struct stat sb;
 
@@ -1739,6 +1739,8 @@ int main(int argc, char **argv)
 		return EXIT_FAILURE;
 	}
 
+	original_wd = open(".", O_DIRECTORY);
+
 	new_argv = malloc(sizeof(char *) * (argc + 5 - optind));
 	new_argv[new_argc++] = argv[0];
 #ifdef HAVE_JUST_FUSE_2_6_5
@@ -1761,5 +1763,7 @@ int main(int argc, char **argv)
 		new_argv[new_argc++] = *aptr;
 
 	new_argv[new_argc] = NULL;
-	return fuse_main(new_argc, (char **)new_argv, &posixovl_ops, NULL);
+	c = fuse_main(new_argc, (char **)new_argv, &posixovl_ops, NULL);
+	fchdir(original_wd);
+	return c;
 }
