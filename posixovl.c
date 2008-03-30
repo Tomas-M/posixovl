@@ -19,6 +19,7 @@
 #include <sys/types.h>
 #include <sys/time.h>
 #include <dirent.h>
+#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <fuse.h>
@@ -749,21 +750,89 @@ static inline bool supports_permissions(const char *path)
 	return __supports_permissions(path);
 }
 
-static char *xfrm_to_disk(const char *in)
+static char *xfrm_to_disk(const char *read_ptr)
 {
-	char *w, *out = strdup(in);
-	for (w = out; *w != '\0'; ++w)
-		if (*w == ':')
-			*w = ';';
+	unsigned int needed = 0;
+	const char *next;
+	char *out, *out_ptr;
+
+	for (next = read_ptr; *next != '\0'; ++next)
+		switch (*next) {
+		case '\\':
+		case ':':
+		case '*':
+		case '?':
+		case '\"':
+		case '<':
+		case '>':
+		case '|':
+			needed += strlen("%(XX)");
+			break;
+		/* Path separator ('/') is not to be encoded! */
+		default:
+			++needed;
+			break;
+		}
+
+	out = out_ptr = malloc(needed + 1);
+	if (out == NULL)
+		return NULL;
+
+	do {
+		next = strpbrk(read_ptr, "\\:*?\"<>|");
+		if (next == NULL) {
+			strcpy(out_ptr, read_ptr);
+			out_ptr += strlen(read_ptr);
+			break;
+		} else if (read_ptr != next) {
+			strncpy(out_ptr, read_ptr, next - read_ptr);
+			out_ptr += next - read_ptr;
+		}
+		sprintf(out_ptr, "%%(%02X)", *next);
+		out_ptr += strlen("%(XX)");
+		read_ptr = next + 1;
+	} while (*read_ptr != '\0');
+
+	*out_ptr = '\0';
 	return out;
 }
 
-static void xfrm_from_disk(char *in)
+static const unsigned char xfrm_table[] = {
+	['0'] =  0, ['1'] =  1, ['2'] =  2, ['3'] =  3,
+	['4'] =  4, ['5'] =  5, ['6'] =  6, ['7'] =  7,
+	['8'] =  8, ['9'] =  9, ['A'] = 10, ['B'] = 11,
+	['C'] = 12, ['D'] = 13, ['E'] = 14, ['F'] = 15,
+};
+
+static char *xfrm_from_disk(const char *read_ptr)
 {
-	for (; *in != '\0'; ++in)
-		if (*in == ';')
-			*in = ':';
-	return;
+	const char *seek_ptr = read_ptr, *next;
+	char *out = malloc(strlen(read_ptr) + 1), *out_ptr = out;
+
+	if (out == NULL)
+		return NULL;
+
+	do {
+		next = strstr(seek_ptr, "%(");
+		if (next == NULL) {
+			strcpy(out_ptr, read_ptr);
+			out_ptr += strlen(read_ptr);
+			break;
+		}
+		if (!isxdigit(next[2]) || !isxdigit(next[3]) ||
+		    next[4] != ')') {
+			seek_ptr = next + 1;
+			continue;
+		}
+		strncpy(out_ptr, read_ptr, next - read_ptr);
+		out_ptr += next - read_ptr;
+		read_ptr = seek_ptr = next + strlen("%(XX)");
+		*out_ptr++ = (xfrm_table[toupper(next[2])] << 4) |
+		             xfrm_table[toupper(next[3])];
+	} while (*read_ptr != '\0');
+
+	*out_ptr = '\0';
+	return out;
 }
 
 static int posixovl_chmod(const char *path, mode_t mode)
@@ -1428,6 +1497,7 @@ static int posixovl_readdir(const char *path, void *buffer,
 	struct hcb info;
 	int ret = 0;
 	DIR *ptr;
+	char *x;
 
 	if (is_resv(path))
 		return -ENOENT;
@@ -1445,9 +1515,10 @@ static int posixovl_readdir(const char *path, void *buffer,
 		if (ret < 0 && ret != -ENOENT_HCB && ret != -EACCES)
 			break;
 		ret = 0;
-		xfrm_from_disk((char *)dentry->d_name);
-		if ((*filldir)(buffer, dentry->d_name, &info.sb, 0) > 0)
+		x = xfrm_from_disk((char *)dentry->d_name);
+		if ((*filldir)(buffer, x, &info.sb, 0) > 0)
 			break;
+		free(x);
 	}
 
 	closedir(ptr);
