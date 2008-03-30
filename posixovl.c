@@ -1,6 +1,7 @@
 /*
  *	posixovl - POSIX overlay filesystem
- *	Copyright © Jan Engelhardt <jengelh@computergmbh.de>, 2007
+ *	Copyright © CC Computer Consultants GmbH, 2007
+ *	Contact: Jan Engelhardt <jengelh [at] computergmbh de>
  *
  *	Development of posixovl sponsored by Slax (http://www.slax.org/)
  *
@@ -119,7 +120,7 @@ struct hcb {
 
 /* Global */
 static mode_t default_mode = S_IRUGO | S_IWUSR;
-static unsigned int assume_vfat;
+static unsigned int assume_vfat, single_threaded;
 static const char *root_dir;
 static int root_fd;
 static pthread_mutex_t posixovl_protect = PTHREAD_MUTEX_INITIALIZER;
@@ -132,7 +133,9 @@ static inline int lock_read(int fd)
 		.l_start  = 0,
 		.l_len    = 0,
 	};
-	return fcntl(fd, F_SETLK, &fl);
+	if (single_threaded)
+		return 0;
+	return fcntl(fd, F_SETLKW, &fl);
 }
 
 static inline int lock_write(int fd)
@@ -143,6 +146,8 @@ static inline int lock_write(int fd)
 		.l_start  = 0,
 		.l_len    = 0,
 	};
+	if (single_threaded)
+		return 0;
 	return fcntl(fd, F_SETLK, &fl);
 }
 
@@ -279,6 +284,8 @@ static int ll_hcb_read(const char *path, struct ll_hcb *info, int fd)
 		goto busted;
 	++toul_ptr;
 	info->rdev = COMPAT_MKDEV(info->rdev, strtoul(toul_ptr, NULL, 0));
+	strncpy(info->new_target, info->target, sizeof(info->new_target));
+	info->new_target[sizeof(info->new_target)-1] = '\0';
 
 	return 0;
 
@@ -1184,6 +1191,7 @@ static int hl_instantiate(const char *oldpath, const char *newpath)
 	struct hcb cb_old, cb_new;
 	int fd, ret;
 
+	pthread_mutex_lock(&posixovl_protect);
 	ret = hcb_lookup(oldpath, &cb_old);
 	if (ret == -ENOENT_HCB || (ret == 0 && !S_ISHARDLNK(cb_old.ll.mode))) {
 		/*
@@ -1191,15 +1199,18 @@ static int hl_instantiate(const char *oldpath, const char *newpath)
 		 */
 		if ((ret = hl_promote(oldpath, &cb_old,
 		    ret != -ENOENT_HCB)) < 0)
-			return ret;
+			goto unlock_and_out;
 		/*
 		 * Relookup to get the L1 file path
 		 */
 		if ((ret = hcb_lookup(oldpath, &cb_old)) < 0)
-			return ret;
+			goto unlock_and_out;
 	} else if (ret < 0) {
+		pthread_mutex_unlock(&posixovl_protect);
 		return -errno;
 	}
+
+	pthread_mutex_unlock(&posixovl_protect);
 
 	/* now we can do the Nth link */
 	if ((ret = hl_up_nlink(cb_old.ll.target)) < 0)
@@ -1228,6 +1239,10 @@ static int hl_instantiate(const char *oldpath, const char *newpath)
  out:
 	hl_drop(cb_old.ll.target);
 	return ret;
+
+ unlock_and_out:
+	pthread_mutex_unlock(&posixovl_protect);
+	return ret;
 }
 
 static int posixovl_link(const char *oldpath, const char *newpath)
@@ -1245,16 +1260,15 @@ static int posixovl_link(const char *oldpath, const char *newpath)
 	 * Kernel/FUSE already takes care of prohibiting hardlinking
 	 * directories. We never get to see these.
 	 */
-	ret = linkat(root_fd, at(oldpath), root_fd, at(newpath), 0);
-	if (ret < 0 && errno != EPERM)
-		return ret;
-	else if (ret >= 0)
-		return 0;
+	if (!assume_vfat) {
+		ret = linkat(root_fd, at(oldpath), root_fd, at(newpath), 0);
+		if (ret < 0 && errno != EPERM)
+			return ret;
+		else if (ret >= 0)
+			return 0;
+	}
 
-	pthread_mutex_lock(&posixovl_protect);
-	ret = hl_instantiate(oldpath, newpath);
-	pthread_mutex_unlock(&posixovl_protect);
-	return ret;
+	return hl_instantiate(oldpath, newpath);
 }
 
 static int posixovl1_link(const char *oldpath, const char *newpath)
@@ -1404,8 +1418,7 @@ static int posixovl1_open(const char *path, struct fuse_file_info *filp)
 static int posixovl_read(const char *path, char *buffer, size_t size,
     off_t offset, struct fuse_file_info *filp)
 {
-	lseek(filp->fh, offset, SEEK_SET);
-	XRET(read(filp->fh, buffer, size));
+	XRET(pread(filp->fh, buffer, size, offset));
 }
 
 static int posixovl_readdir(const char *path, void *buffer,
@@ -1458,11 +1471,13 @@ static int posixovl_readlink(const char *path, char *dest, size_t size)
 	if (is_resv(path))
 		return -ENOENT;
 
-	ret = readlinkat(root_fd, at(path), dest, size);
-	if (ret < 0 && errno != EINVAL)
+	ret = readlinkat(root_fd, at(path), dest, size - 1);
+	if (ret < 0 && errno != EINVAL) {
 		return ret;
-	else if (ret >= 0)
+	} else if (ret >= 0) {
+		dest[ret] = '\0';
 		return 0;
+	}
 
 	ret = hcb_lookup_deref(path, &info);
 	if (ret == -ENOENT_HCB)
@@ -1504,7 +1519,7 @@ static int posixovl_rename(const char *oldpath, const char *newpath)
 		return -ENAMETOOLONG;
 
 	ret = hcb_lookup(oldpath, &old_info);
-	if (ret == -ENOENT_HCB)
+	if (ret == -ENOENT_HCB || S_ISDIR(old_info.sb.st_mode))
 		XRET(renameat(root_fd, at(oldpath), root_fd, at(newpath)));
 	else if (ret < 0)
 		return ret;
@@ -1776,8 +1791,7 @@ static int posixovl1_utimens(const char *path, const struct timespec *ts)
 static int posixovl_write(const char *path, const char *buffer, size_t size,
     off_t offset, struct fuse_file_info *filp)
 {
-	lseek(filp->fh, offset, SEEK_SET);
-	XRET(write(filp->fh, buffer, size));
+	XRET(pwrite(filp->fh, buffer, size, offset));
 }
 
 static bool user_allow_other(void)
@@ -1840,11 +1854,15 @@ static void usage(const char *p)
 int main(int argc, char **argv)
 {
 	char **aptr, **new_argv;
-	int new_argc = 0, c;
+	int new_argc = 0, original_wd, c;
+	char xargs[256];
 	struct stat sb;
 
-	while ((c = getopt(argc, argv, "FS:")) > 0) {
+	while ((c = getopt(argc, argv, "1FS:")) > 0) {
 		switch (c) {
+			case '1':
+				single_threaded = true;
+				break;
 			case 'F':
 				assume_vfat = true;
 				break;
@@ -1875,17 +1893,31 @@ int main(int argc, char **argv)
 		return EXIT_FAILURE;
 	}
 
-	new_argv = malloc(sizeof(char *) * (argc + 4 - optind));
+	original_wd = open(".", O_DIRECTORY);
+
+	new_argv = malloc(sizeof(char *) * (argc + 5 - optind));
 	new_argv[new_argc++] = argv[0];
-	new_argv[new_argc++] = "-oattr_timeout=0,default_permissions,use_ino,"
-	                       "nonempty,fsname=posix-overlay";
+#ifdef HAVE_JUST_FUSE_2_6_5
+	snprintf(xargs, sizeof(xargs),
+	         "-oattr_timeout=0,default_permissions,use_ino,nonempty,dev,"
+	         "fsname=posix-overlay(%s)", root_dir);
+#else
+	snprintf(xargs, sizeof(xargs),
+	         "-oattr_timeout=0,default_permissions,use_ino,nonempty,dev,"
+	         "fsname=posix-overlay(%s),subtype=posixovl", root_dir);
+#endif
+	new_argv[new_argc++] = xargs;
 
 	if (user_allow_other())
 		new_argv[new_argc++] = "-oallow_other";
+	if (single_threaded)
+		new_argv[new_argc++] = "-s";
 
 	for (aptr = &argv[optind]; *aptr != NULL; ++aptr)
 		new_argv[new_argc++] = *aptr;
 
 	new_argv[new_argc] = NULL;
-	return fuse_main(new_argc, (char **)new_argv, &posixovl_ops, NULL);
+	c = fuse_main(new_argc, (char **)new_argv, &posixovl_ops, NULL);
+	fchdir(original_wd);
+	return c;
 }

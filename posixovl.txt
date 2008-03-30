@@ -37,5 +37,14 @@ Notes
 	`df` will show:
 	$ df -Tah
 	Filesystem    Type    Size  Used Avail Use% Mounted on
-	/dev/hda5     vfat    5.9G  2.1G  3.9G  35% /D
-	posix-overlay fuse    5.9G  2.1G  3.9G  35% /D
+	/dev/hda5     vfat    5.9G  2.1G  3.9G  35% /windows/D
+	posix-overlay(/windows/D)
+	     fuse.posixovl    5.9G  2.1G  3.9G  35% /windows/D
+
+	In general, posixovl does not handle case-insensitivity of the
+	underlying filesystem (in case of vfat, for example). If you create a
+	file "X0" on vfat, it is usually lowercased to "x0", which may break
+	some software, namely X.org. In order to make vfat behave more
+	POSIX-like, the following mount options are recommended:
+
+	$ mount -t vfat /dev/hda1 /windows/D -o check=s,shortname=mixed
