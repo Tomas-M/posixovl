@@ -1,6 +1,6 @@
 /*
  *	posixovl - POSIX overlay filesystem
- *	Copyright © CC Computer Consultants GmbH, 2007
+ *	Copyright © CC Computer Consultants GmbH, 2007 - 2008
  *	Contact: Jan Engelhardt <jengelh [at] computergmbh de>
  *
  *	Development of posixovl sponsored by Slax (http://www.slax.org/)
@@ -1087,14 +1087,14 @@ static int posixovl_getxattr(const char *path, const char *name,
 	XRET(lgetxattr(at(path), name, value, size));
 }
 
-static int posixovl_fgetattr(const char *path, struct stat *sb,
+static int posixovl1_fgetattr(const char *path, struct stat *sb,
     struct fuse_file_info *filp)
 {
 	/*
 	 * Need to use the normal getattr because we need to check for the
 	 * HCB too, not just @filp->fh.
 	 */
-	return posixovl_getattr(path, sb);
+	return posixovl1_getattr(path, sb);
 }
 
 static void *posixovl_init(struct fuse_conn_info *conn)
@@ -1889,7 +1889,7 @@ static const struct fuse_operations posixovl_ops = {
 	.chmod       = posixovl1_chmod,
 	.chown       = posixovl1_chown,
 	.create      = posixovl1_create,
-	.fgetattr    = posixovl_fgetattr,
+	.fgetattr    = posixovl1_fgetattr,
 	.ftruncate   = posixovl_ftruncate,
 	.getattr     = posixovl1_getattr,
 	.getxattr    = posixovl_getxattr,
