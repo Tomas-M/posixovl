@@ -1927,7 +1927,6 @@ int main(int argc, char **argv)
 	char **aptr, **new_argv;
 	int new_argc = 0, original_wd, c;
 	char xargs[256];
-	struct stat sb;
 
 	while ((c = getopt(argc, argv, "1FS:")) > 0) {
 		switch (c) {
@@ -1955,12 +1954,6 @@ int main(int argc, char **argv)
 	if ((root_fd = open(root_dir, O_DIRECTORY)) < 0) {
 		fprintf(stderr, "Could not open(\"%s\"): %s\n",
 		        root_dir, strerror(errno));
-		return EXIT_FAILURE;
-	}
-
-	if (fstat(root_fd, &sb) < 0) {
-		/* somebody remind me why I added this.. */
-		perror("fstat");
 		return EXIT_FAILURE;
 	}
 
