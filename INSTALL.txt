@@ -1,6 +1,6 @@
 
-  Installation when using an subversion snapshot
-==================================================
+  Installation when using a GIT snapshot
+==========================================
 
 Requires:
 	autoconf, automake
