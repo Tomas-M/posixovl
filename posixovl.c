@@ -1406,11 +1406,13 @@ static int posixovl_mknod(const char *path, mode_t mode, dev_t rdev)
 	if (is_resv(path))
 		return -EPERM;
 
-	ret = mknodat(root_fd, at(path), mode, rdev);
-	if (ret < 0 && errno != EPERM)
-		return ret;
-	else if (ret >= 0)
-		return 0;
+	if (!assume_vfat) {
+		ret = mknodat(root_fd, at(path), mode, rdev);
+		if (ret < 0 && errno != EPERM)
+			return ret;
+		else if (ret >= 0)
+			return 0;
+	}
 
 	/*
 	 * The HCB is created first - since that one does not show up in
@@ -1679,11 +1681,13 @@ static int posixovl_symlink(const char *oldpath, const char *newpath)
 	if (is_resv(newpath))
 		return -EPERM;
 
-	ret = symlinkat(oldpath, root_fd, at(newpath));
-	if (ret < 0 && errno != EPERM)
-		return -errno;
-	else if (ret >= 0)
-		return 0;
+	if (!assume_vfat) {
+		ret = symlinkat(oldpath, root_fd, at(newpath));
+		if (ret < 0 && errno != EPERM)
+			return -errno;
+		else if (ret >= 0)
+			return 0;
+	}
 
 	/* symlink() not supported on @path */
 	if ((ret = hcb_new(newpath, &info, 0)) < 0)
