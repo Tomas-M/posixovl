@@ -1,7 +1,6 @@
 /*
  *	posixovl - POSIX overlay filesystem
- *	Copyright © CC Computer Consultants GmbH, 2007 - 2008
- *	Contact: Jan Engelhardt <jengelh [at] computergmbh de>
+ *	Copyright © Jan Engelhardt <jengelh [at] computergmbh de>, 2007 - 2008
  *
  *	Development of posixovl sponsored by Slax (http://www.slax.org/)
  *
@@ -126,7 +125,7 @@ static const char *root_dir;
 static int root_fd;
 static pthread_mutex_t posixovl_protect = PTHREAD_MUTEX_INITIALIZER;
 
-static inline int lock_read(int fd)
+static int lock_read(int fd)
 {
 	static const struct flock fl = {
 		.l_type   = F_RDLCK,
@@ -139,7 +138,7 @@ static inline int lock_read(int fd)
 	return fcntl(fd, F_SETLKW, &fl);
 }
 
-static inline int lock_write(int fd)
+static int lock_write(int fd)
 {
 	static const struct flock fl = {
 		.l_type   = F_WRLCK,
@@ -164,7 +163,7 @@ static __attribute__((pure)) const char *at(const char *in)
 	return in + 1;
 }
 
-static inline char *strlcpy(char *dest, const char *src, size_t n)
+static char *strlcpy(char *dest, const char *src, size_t n)
 {
 	strncpy(dest, src, n);
 	dest[n-1] = '\0';
@@ -438,7 +437,7 @@ static int hcb_get(const char *path, struct hcb *cb)
  * (Also because whether a change was made is not recorded. Explicitly call
  * hcb_update().)
  */
-static inline void hcb_put(const struct hcb *cb)
+static void hcb_put(const struct hcb *cb)
 {
 	if (cb->fd < 0)
 		should_not_happen();
@@ -509,7 +508,7 @@ static int hcb_deref(struct hcb *cb)
  *
  * Retrieve the lowest HCB.
  */
-static inline int hcb_get_deref(const char *path, struct hcb *cb)
+static int hcb_get_deref(const char *path, struct hcb *cb)
 {
 	int ret;
 
@@ -528,7 +527,7 @@ static inline int hcb_get_deref(const char *path, struct hcb *cb)
  * Write back the HCB with possibly changed data. hcb_put() is called
  * afterwards because that's what is usually intended.
  */
-static inline int hcb_update(struct hcb *cb)
+static int hcb_update(struct hcb *cb)
 {
 	int ret;
 
@@ -558,7 +557,7 @@ static inline int hcb_update(struct hcb *cb)
  *
  * Do a standard HCB lookup with hardlink following.
  */
-static inline int hcb_lookup(const char *path, struct hcb *cb)
+static int hcb_lookup(const char *path, struct hcb *cb)
 {
 	int ret;
 
@@ -576,7 +575,7 @@ static inline int hcb_lookup(const char *path, struct hcb *cb)
  *
  * Do a standard HCB lookup with hardlink following.
  */
-static inline int hcb_lookup_deref(const char *path, struct hcb *cb)
+static int hcb_lookup_deref(const char *path, struct hcb *cb)
 {
 	int ret;
 
@@ -596,7 +595,7 @@ static inline int hcb_lookup_deref(const char *path, struct hcb *cb)
  * Combines the working directory @dir with @name (to form an absolute path),
  * then retrieves the HCB.
  */
-static inline int hcb_lookup_readdir(const char *dir, const char *name,
+static int hcb_lookup_readdir(const char *dir, const char *name,
     struct hcb *info)
 {
 	char path[PATH_MAX];
@@ -626,7 +625,7 @@ static inline int hcb_lookup_readdir(const char *dir, const char *name,
 	return 0;
 }
 
-static __attribute__((pure)) inline bool is_resv_name(const char *name)
+static __attribute__((pure)) bool is_resv_name(const char *name)
 {
 	return strncmp(name, HCB_PREFIX, HCB_PREFIX_LEN) == 0 ||
 	       strncmp(name, HL_DNODE_PREFIX, HL_DNODE_PREFIX_LEN) == 0 ||
@@ -634,7 +633,7 @@ static __attribute__((pure)) inline bool is_resv_name(const char *name)
 	       strcmp(name, HCB_PREFIX1) == 0;
 }
 
-static __attribute__((pure)) inline bool is_resv(const char *path)
+static __attribute__((pure)) bool is_resv(const char *path)
 {
 	const char *file = strrchr(path, '/');
 	if (file++ == NULL)
@@ -664,8 +663,8 @@ static bool __supports_owners(const char *path, uid_t uid,
     gid_t gid, bool restore)
 {
 	struct stat orig_sb, new_sb;
-	uid_t work_uid;
-	gid_t work_gid;
+	uid_t work_uid = -1;
+	gid_t work_gid = -1;
 
 	if (fstatat(root_fd, at(path), &orig_sb, AT_SYMLINK_NOFOLLOW) < 0) {
 		perror("fstatat");
@@ -706,7 +705,7 @@ static bool __supports_owners(const char *path, uid_t uid,
 	return new_sb.st_uid == work_uid && new_sb.st_gid == work_gid;
 }
 
-static inline bool supports_owners(const char *path, uid_t uid,
+static bool supports_owners(const char *path, uid_t uid,
     gid_t gid, bool restore)
 {
 	if (assume_vfat)
@@ -743,7 +742,7 @@ static bool __supports_permissions(const char *path)
 	return new_sb.st_mode == work_mode;
 }
 
-static inline bool supports_permissions(const char *path)
+static bool supports_permissions(const char *path)
 {
 	if (assume_vfat)
 		return false;
@@ -905,7 +904,7 @@ static int posixovl_close(const char *path, struct fuse_file_info *filp)
 	XRET(close(filp->fh));
 }
 
-static __attribute__((pure)) inline bool could_be_too_long(const char *path)
+static __attribute__((pure)) bool could_be_too_long(const char *path)
 {
 	/* Longest possible case is S_ISDIR: /path/.pxovl. */
 	return strlen(path) + 1 + HCB_PREFIX_LEN >= PATH_MAX;
@@ -919,7 +918,7 @@ static __attribute__((pure)) inline bool could_be_too_long(const char *path)
  * Checks whether @path's parent is owned by @uid.
  * @path denotes a path on the real volume, hence no HCB lookup here.
  */
-static inline bool parent_owner_match(const char *path, uid_t uid)
+static bool parent_owner_match(const char *path, uid_t uid)
 {
 	struct stat sb;
 	int ret;
@@ -1982,6 +1981,7 @@ int main(int argc, char **argv)
 
 	new_argv[new_argc] = NULL;
 	c = fuse_main(new_argc, (char **)new_argv, &posixovl_ops, NULL);
-	fchdir(original_wd);
+	if (fchdir(original_wd) < 0)
+		/* ignore */;
 	return c;
 }
