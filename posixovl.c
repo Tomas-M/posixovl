@@ -183,7 +183,6 @@ static void __hl_dtoi(char *dest, size_t destsize, const char *src)
 		last = p + 1;
 
 	memcpy(last, HL_INODE_PREFIX, HL_INODE_PREFIX_LEN);
-	return;
 }
 
 #define hl_dtoi(dest, src) __hl_dtoi((dest), sizeof(dest), (src))
@@ -442,7 +441,6 @@ static void hcb_put(const struct hcb *cb)
 	if (cb->fd < 0)
 		should_not_happen();
 	close(cb->fd);
-	return;
 }
 
 /*
