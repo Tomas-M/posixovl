@@ -944,7 +944,6 @@ static int posixovl_create(const char *path, mode_t mode,
 	if (could_be_too_long(path))
 		return -ENAMETOOLONG;
 
-	ctx = fuse_get_context();
 	fd  = openat(root_fd, at(path), filp->flags, mode);
 	if (fd < 0)
 		return -errno;
@@ -958,6 +957,8 @@ static int posixovl_create(const char *path, mode_t mode,
 	 * supported.
 	 * Fuse oddity: @mode includes S_IFREG (contraty to mkdir())
 	 */
+	ctx = fuse_get_context();
+
 	if (((mode & ~S_IWUSR) != (S_IFREG | (default_mode & ~S_IWUSR)) &&
 	    !supports_permissions(path)) ||
 	    (!parent_owner_match(path, ctx->uid) &&
@@ -1365,12 +1366,13 @@ static int posixovl_mkdir(const char *path, mode_t mode)
 	if (could_be_too_long(path))
 		return -ENAMETOOLONG;
 
-	ctx = fuse_get_context();
 	ret = mkdirat(root_fd, at(path), mode);
 	if (ret < 0)
 		return -errno;
 
 	/* FUSE oddity: @mode does not include S_IFDIR */
+	ctx = fuse_get_context();
+
 	if (((mode & ~S_IWUSR) != ((default_mode & ~S_IWUSR) | S_IXUGO) &&
 	    !supports_permissions(path)) ||
 	    (!parent_owner_match(path, ctx->uid) &&
@@ -1404,7 +1406,6 @@ static int posixovl_mknod(const char *path, mode_t mode, dev_t rdev)
 	if (is_resv(path))
 		return -EPERM;
 
-	ctx = fuse_get_context();
 	ret = mknodat(root_fd, at(path), mode, rdev);
 	if (ret < 0 && errno != EPERM)
 		return ret;
@@ -1418,6 +1419,8 @@ static int posixovl_mknod(const char *path, mode_t mode, dev_t rdev)
 	 */
 	if ((ret = hcb_new(path, &info, 0)) < 0)
 		return ret;
+
+	ctx = fuse_get_context();
 	info.ll.mode  = mode;
 	info.ll.nlink = 1;
 	info.ll.uid   = ctx->uid;
@@ -1676,7 +1679,6 @@ static int posixovl_symlink(const char *oldpath, const char *newpath)
 	if (is_resv(newpath))
 		return -EPERM;
 
-	ctx = fuse_get_context();
 	ret = symlinkat(oldpath, root_fd, at(newpath));
 	if (ret < 0 && errno != EPERM)
 		return -errno;
@@ -1684,10 +1686,10 @@ static int posixovl_symlink(const char *oldpath, const char *newpath)
 		return 0;
 
 	/* symlink() not supported on @path */
-
 	if ((ret = hcb_new(newpath, &info, 0)) < 0)
 		return ret;
 
+	ctx = fuse_get_context();
 	info.ll.mode  = S_IFSOFTLNK;
 	info.ll.nlink = 1;
 	info.ll.uid   = ctx->uid;
