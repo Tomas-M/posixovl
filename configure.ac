@@ -1,5 +1,5 @@
 
-AC_INIT(posixovl, 1.0)
+AC_INIT([posixovl], [1.1])
 AC_CONFIG_HEADERS(config.h)
 AC_PROG_INSTALL
 AM_INIT_AUTOMAKE
