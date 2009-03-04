@@ -28,11 +28,13 @@ PKG_CHECK_MODULES([libfuse], [fuse >= 2.7.0], [], [
 AC_MSG_CHECKING([for utimensat()])
 AC_LINK_IFELSE([
 		#define _ATFILE_SOURCE 1
+		#include <sys/stat.h>
 		#include <fcntl.h>
 		#include <asm/unistd.h>
 		static unsigned int x = __NR_utimensat;
 		static int (*y)(int, const char *, const struct timespec *,
 			int) = utimensat;
+		int main(void) { return 0; }
 	], [
 		AC_DEFINE([HAVE_UTIMENSAT], [1],
 			[Define if utimensat() function is available])
