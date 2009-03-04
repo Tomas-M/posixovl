@@ -26,6 +26,10 @@ PKG_CHECK_MODULES([libfuse], [fuse >= 2.7.0], [], [
 
 # Minium requirements for utimensat(): Linux 2.6.22-rc1 and Glibc 2.6
 AC_MSG_CHECKING([for utimensat()])
+#
+# We need to check for __NR_utimensat too, because Glibc would
+# offer a wrapper otherwise.
+#
 AC_LINK_IFELSE([
 		#define _ATFILE_SOURCE 1
 		#include <sys/stat.h>
