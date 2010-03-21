@@ -1,6 +1,5 @@
 # -*- Makefile -*-
 
-AUTOMAKE_OPTIONS       = foreign subdir-objects
 AM_CFLAGS              = $(regular_CFLAGS) $(libfuse_CFLAGS)
 
 sbin_PROGRAMS          = mount.posixovl
