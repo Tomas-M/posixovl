@@ -1,0 +1,94 @@
+.TH posixovl 1 "2010-12-07" "posixovl" "posixovl"
+.SH Name
+.PP
+posixovl \(em The POSIX Overlay Filesystem
+.SH Syntax
+.PP
+\fBmount.posixovl\fP [\fB\-F\fP] [\fB\-S\fP \fIsource_dir\fP] \fItarget_dir\fP
+[\fB\-\-\fP \fIfuse_opts\fP]
+.SH Description
+.PP
+posixovl provides a filesystem view that supports various POSIX operations
+while using an otherwise incapable lower filesystem. Filesystems of various
+degrees of POSIXness can be utilitzed. VFAT is a common denominator when it
+comes to cross-compatibility, though NTFS \(em its features are unused in
+Linux \(em would be another possibility. Secondly, potent native POSIX-style
+filesystems can also be used, though the actual use of doing that remains to
+be discovered.
+.SH Options
+.PP
+If no source directory is given, the target directory specifies both source
+and target (mountpoint), yielding an "overmount".
+.TP
+\fB\-F\fP
+Disable permission and ownership checks on the lower filesystem. Normally these
+would be used to check for POSIX filesystems mounted inside a non-POSIX
+tree. (For example, where /vfat is vfat, and /vfat/xfs is a POSIX-behaving
+filesystem.)
+.SH Supported operations
+.PP
+posixovl will emulate the following calls if the lower filesystem is incapable
+of supporting these operations:
+.IP \(bu 4
+chmod
+.IP \(bu 4
+chown
+.IP \(bu 4
+hard links
+.IP \(bu 4
+mkfifo
+.IP \(bu 4
+mknod
+.IP \(bu 4
+symbolic links
+.PP
+The following currently only work in passthrough mode (when using a lower
+filesystem that already supports these):
+.IP \(bu 4
+Linux ACLs/xattrs
+.PP
+Missing suppot:
+.IP \(bu 4
+Case-sensitivity
+.SH Notes
+.PP
+Using posixovl on an already POSIX-behaving filesystem (e.g. XFS) incurs some
+issues, since detecting whether a path is POSIX behaving or not is difficult.
+Hence, the following decision was made:
+.IP \(bu 4
+permissions will be set to the default permissions (see below) unless a HCB
+(hidden control block, the metadata files for posixovl) is found that can
+override these
+.IP \(bu 4
+all lower-level files will be operated on/created with the user who inititated
+the mount
+.PP
+If no HCB exists for a file or directory, the default permissions are 644 and
+755, respectively. The owner and group of the inode will be the owner/group of
+the real file.
+.PP
+Each non-regular, non-directory virtual file will have a zero-size real file.
+(Simplifies handling, and makes it apprarent the object exists when using other
+OS.)
+.PP
+`df` will show:
+.nf
+$ df -Tah
+Filesystem    Type    Size  Used Avail Use% Mounted on
+/dev/hda5     vfat    5.9G  2.1G  3.9G  35% /windows/D
+posix-overlay(/windows/D)
+     fuse.posixovl    5.9G  2.1G  3.9G  35% /windows/D
+.fi
+.PP
+In general, posixovl does not handle case-insensitivity of the underlying
+filesystem (in case of vfat, for example). If you create a file "X0" on vfat,
+it is usually lowercased to "x0", which may break some software, namely X.org.
+In order to make vfat behave more POSIX-like, the following mount options are
+recommended:
+.PP
+$ mount -t vfat /dev/hda1 /windows/D -o check=s,shortname=mixed
+.SH Authors
+.PP
+posixovl and this manpage were written by Jan Engelhardt.
+.PP
+Development of posixovl was sponsored by Slax (http://www.slax.org/).

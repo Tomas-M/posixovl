@@ -2,6 +2,8 @@
 
 AM_CFLAGS              = $(regular_CFLAGS) $(libfuse_CFLAGS)
 
+man_MANS = posixovl.1
+
 sbin_PROGRAMS          = mount.posixovl
 EXTRA_PROGRAMS         = socket lntest
 mount_posixovl_SOURCES = posixovl.c
