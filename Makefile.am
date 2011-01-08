@@ -1,5 +1,6 @@
 # -*- Makefile -*-
 
+AM_CPPFLAGS            = ${regular_CPPFLAGS}
 AM_CFLAGS              = $(regular_CFLAGS) $(libfuse_CFLAGS)
 
 man_MANS = posixovl.1
