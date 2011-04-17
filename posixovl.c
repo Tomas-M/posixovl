@@ -221,11 +221,11 @@ static int __real_to_hcb(char *dest, size_t destsize, const char *src)
 
 	if (strncmp(filename_part, HL_DNODE_PREFIX, HL_DNODE_PREFIX_LEN) == 0)
 		ret = snprintf(dest, destsize, "%.*s" HL_INODE_PREFIX "%s",
-		      filename_part - directory_part, directory_part,
+		      (int)(filename_part - directory_part), directory_part,
 		      filename_part + HL_DNODE_PREFIX_LEN);
 	else
 		ret = snprintf(dest, destsize, "%.*s" HCB_PREFIX "%s",
-		      filename_part - directory_part, directory_part,
+		      (int)(filename_part - directory_part), directory_part,
 		      filename_part);
 	if (ret > destsize)
 		return -ENAMETOOLONG;
