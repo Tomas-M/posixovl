@@ -32,7 +32,7 @@ AC_MSG_CHECKING([for utimensat()])
 # We need to check for __NR_utimensat too, because Glibc would
 # offer a wrapper otherwise.
 #
-AC_LINK_IFELSE([
+AC_LINK_IFELSE([AC_LANG_SOURCE([
 		#define _ATFILE_SOURCE 1
 		#include <sys/stat.h>
 		#include <fcntl.h>
@@ -41,7 +41,7 @@ AC_LINK_IFELSE([
 		static int (*y)(int, const char *, const struct timespec *,
 			int) = utimensat;
 		int main(void) { return 0; }
-	], [
+	])], [
 		AC_DEFINE([HAVE_UTIMENSAT], [1],
 			[Define if utimensat() function is available])
 		AC_MSG_RESULT([yes])
