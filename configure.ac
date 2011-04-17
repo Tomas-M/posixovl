@@ -1,5 +1,4 @@
-
-AC_INIT([posixovl], [1.1])
+AC_INIT([posixovl], [1.2])
 AC_PREREQ([2.61])
 AC_CONFIG_HEADERS([config.h])
 AC_PROG_INSTALL
