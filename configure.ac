@@ -8,7 +8,7 @@ AM_PROG_CC_C_O
 
 regular_CPPFLAGS="-D_FORTIFY_SOURCE=2 -D_LARGEFILE_SOURCE=1 -D_LARGE_FILES \
 	-D_FILE_OFFSET_BITS=64 -D_REENTRANT";
-regular_CFLAGS="-Wall -Waggregate-return \
+regular_CFLAGS="-std=c99 -Wall -Waggregate-return \
 	-Wmissing-declarations -Wmissing-prototypes -Wredundant-decls \
 	-Wshadow -Wstrict-prototypes -Winline -pipe"
 AC_SUBST([regular_CPPFLAGS])
