@@ -79,13 +79,6 @@
 #define hcb_got_busted(path) \
 	fprintf(stderr, "HCB %s got busted\n", (path))
 
-/* Shortcut */
-#define XRET(v) \
-	return ({ \
-		int __ret = (v); \
-		(__ret >= 0) ? __ret : -errno; \
-	})
-
 /* Definitions */
 #define HCB_PREFIX1    ".pxovl"  /* extra vfat idiocy */
 #define HCB_PREFIX     ".pxovl."
@@ -124,6 +117,16 @@ static unsigned int assume_vfat, single_threaded;
 static const char *root_dir;
 static int root_fd;
 static pthread_mutex_t posixovl_protect = PTHREAD_MUTEX_INITIALIZER;
+
+static inline int retcode_int(int code)
+{
+	return (code >= 0) ? code : -errno;
+}
+
+static inline ssize_t retcode_ssize(ssize_t code)
+{
+	return (code >= 0) ? code : -errno;
+}
 
 static int lock_read(int fd)
 {
@@ -842,8 +845,8 @@ static int posixovl_chmod(const char *path, mode_t mode)
 	ret = hcb_get_deref(path, &info);
 	if (ret == -ENOENT_HCB) {
 		if (supports_permissions(path))
-			XRET(fchmodat(root_fd, at(path), mode,
-			     AT_SYMLINK_NOFOLLOW));
+			return retcode_int(fchmodat(root_fd, at(path), mode,
+			       AT_SYMLINK_NOFOLLOW));
 		if ((ret = hcb_new(path, &info, 1)) < 0)
 			return ret;
 		/* nlink already set (hcb_new() stat'ed @path) */
@@ -873,8 +876,8 @@ static int posixovl_chown(const char *path, uid_t uid, gid_t gid)
 	ret = hcb_get_deref(path, &info);
 	if (ret == -ENOENT_HCB) {
 		if (supports_owners(path, uid, gid, false))
-			XRET(fchownat(root_fd, at(path), uid, gid,
-			     AT_SYMLINK_NOFOLLOW));
+			return retcode_int(fchownat(root_fd, at(path), uid,
+			       gid, AT_SYMLINK_NOFOLLOW));
 		if ((ret = hcb_new(path, &info, 1)) < 0)
 			return ret;
 		/* nlink already set (hcb_new() stat'ed @path) */
@@ -899,7 +902,7 @@ static int posixovl1_chown(const char *path, uid_t uid, gid_t gid)
 
 static int posixovl_close(const char *path, struct fuse_file_info *filp)
 {
-	XRET(close(filp->fh));
+	return retcode_int(close(filp->fh));
 }
 
 static __attribute__((pure)) bool could_be_too_long(const char *path)
@@ -985,7 +988,7 @@ static int posixovl1_create(const char *path, mode_t mode,
 static int posixovl_ftruncate(const char *path, off_t length,
     struct fuse_file_info *filp)
 {
-	XRET(ftruncate(filp->fh, length));
+	return retcode_int(ftruncate(filp->fh, length));
 }
 
 /*
@@ -1082,7 +1085,7 @@ static int posixovl1_getattr(const char *path, struct stat *sb)
 static int posixovl_getxattr(const char *path, const char *name,
     char *value, size_t size)
 {
-	XRET(lgetxattr(at(path), name, value, size));
+	return retcode_int(lgetxattr(at(path), name, value, size));
 }
 
 static int posixovl1_fgetattr(const char *path, struct stat *sb,
@@ -1350,7 +1353,7 @@ static int posixovl1_link(const char *oldpath, const char *newpath)
 
 static int posixovl_listxattr(const char *path, char *list, size_t size)
 {
-	XRET(llistxattr(at(path), list, size));
+	return retcode_int(llistxattr(at(path), list, size));
 }
 
 static int posixovl_mkdir(const char *path, mode_t mode)
@@ -1489,7 +1492,7 @@ static int posixovl1_open(const char *path, struct fuse_file_info *filp)
 static int posixovl_read(const char *path, char *buffer, size_t size,
     off_t offset, struct fuse_file_info *filp)
 {
-	XRET(pread(filp->fh, buffer, size, offset));
+	return retcode_ssize(pread(filp->fh, buffer, size, offset));
 }
 
 static int posixovl_readdir(const char *path, void *buffer,
@@ -1575,7 +1578,7 @@ static int posixovl1_readlink(const char *path, char *dest, size_t size)
 
 static int posixovl_removexattr(const char *path, const char *name)
 {
-	XRET(lremovexattr(path, name));
+	return retcode_int(lremovexattr(path, name));
 }
 
 static int posixovl_rename(const char *oldpath, const char *newpath)
@@ -1593,7 +1596,8 @@ static int posixovl_rename(const char *oldpath, const char *newpath)
 
 	ret = hcb_lookup(oldpath, &old_info);
 	if (ret == -ENOENT_HCB || S_ISDIR(old_info.sb.st_mode))
-		XRET(renameat(root_fd, at(oldpath), root_fd, at(newpath)));
+		return retcode_int(renameat(root_fd, at(oldpath),
+		       root_fd, at(newpath)));
 	else if (ret < 0)
 		return ret;
 
@@ -1645,7 +1649,7 @@ static int posixovl_rmdir(const char *path)
 	ret = hcb_lookup(path, &info);
 	if (ret == 0 && unlinkat(root_fd, at(info.path), 0) < 0)
 		return -errno;
-	XRET(unlinkat(root_fd, at(path), AT_REMOVEDIR));
+	return retcode_int(unlinkat(root_fd, at(path), AT_REMOVEDIR));
 }
 
 static int posixovl1_rmdir(const char *path)
@@ -1659,7 +1663,7 @@ static int posixovl1_rmdir(const char *path)
 static int posixovl_setxattr(const char *path, const char *name,
     const char *value, size_t size, int flags)
 {
-	XRET(lsetxattr(at(path), name, value, size, flags));
+	return retcode_int(lsetxattr(at(path), name, value, size, flags));
 }
 
 static int posixovl_statfs(const char *path, struct statvfs *sb)
@@ -1850,8 +1854,7 @@ static int posixovl_utimens(const char *path, const struct timespec *ts)
 	else
 		ret = utimensat(root_fd, at(path), ts, AT_SYMLINK_NOFOLLOW);
 #endif
-
-	XRET(ret);
+	return retcode_int(ret);
 }
 
 static int posixovl1_utimens(const char *path, const struct timespec *ts)
@@ -1865,7 +1868,7 @@ static int posixovl1_utimens(const char *path, const struct timespec *ts)
 static int posixovl_write(const char *path, const char *buffer, size_t size,
     off_t offset, struct fuse_file_info *filp)
 {
-	XRET(pwrite(filp->fh, buffer, size, offset));
+	return retcode_ssize(pwrite(filp->fh, buffer, size, offset));
 }
 
 static bool user_allow_other(void)
