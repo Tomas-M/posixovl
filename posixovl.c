@@ -1989,6 +1989,6 @@ int main(int argc, char **argv)
 	new_argv[new_argc] = NULL;
 	c = fuse_main(new_argc, (char **)new_argv, &posixovl_ops, NULL);
 	if (fchdir(original_wd) < 0)
-		/* ignore */;
+		/* ignore */{}
 	return c;
 }
