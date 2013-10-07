@@ -1,5 +1,6 @@
 AC_INIT([posixovl], [1.2])
 AC_PREREQ([2.61])
+AC_CONFIG_AUX_DIR([build-aux])
 AC_CONFIG_HEADERS([config.h])
 AC_PROG_INSTALL
 AM_INIT_AUTOMAKE([-Wall foreign subdir-objects])
