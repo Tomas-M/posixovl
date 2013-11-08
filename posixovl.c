@@ -77,12 +77,18 @@
 #	define should_not_happen()   do {} while (false)
 #endif
 #define hcb_got_busted(path) \
-	fprintf(stderr, "HCB %s got busted\n", (path))
+	fprintf(stderr, "HCB %s is corrupt\n", (path))
 
 /* Definitions */
-#define HCB_PREFIX1    ".pxovl"  /* extra vfat idiocy */
+
 #define HCB_PREFIX     ".pxovl."
 #define HCB_PREFIX_LEN (sizeof(HCB_PREFIX) - 1)
+/*
+ * Trailing dots may be eaten, so we need to check some filenames for
+ * another variant.
+ */
+#define HCB_PREFIX1    ".pxovl"
+
 #define HL_DNODE_PREFIX     ".pxovd."
 #define HL_DNODE_PREFIX_LEN (sizeof(HL_DNODE_PREFIX) - 1)
 #define HL_INODE_PREFIX     ".pxovn."
@@ -93,6 +99,13 @@ enum {
 	ENOENT_HCB = 4096,
 };
 
+/**
+ * ll_hcb - lowlevel HCB
+ * @buf:	buffer for contents of HCB file
+ * @new_target:	buffer to hold the link target
+ * @target:	pointer to @new_target (always?)
+ * rest:	inode properties
+ */
 struct ll_hcb {
 	char buf[PATH_MAX], new_target[PATH_MAX];
 	const char *target;
@@ -104,6 +117,9 @@ struct ll_hcb {
 	size_t size;
 };
 
+/**
+ * The "hidden control block".
+ */
 struct hcb {
 	char path[PATH_MAX];
 	struct ll_hcb ll;
@@ -128,6 +144,9 @@ static inline ssize_t retcode_ssize(ssize_t code)
 	return (code >= 0) ? code : -errno;
 }
 
+/**
+ * Set a read lock on the entire of a file.
+ */
 static int lock_read(int fd)
 {
 	static const struct flock fl = {
@@ -141,6 +160,9 @@ static int lock_read(int fd)
 	return fcntl(fd, F_SETLKW, &fl);
 }
 
+/**
+ * Set a write lock on the entire of a file.
+ */
 static int lock_write(int fd)
 {
 	static const struct flock fl = {
@@ -154,7 +176,7 @@ static int lock_write(int fd)
 	return fcntl(fd, F_SETLK, &fl);
 }
 
-/*
+/**
  * at - turn a virtual path into a relative (to root_fd) one
  */
 static __attribute__((pure)) const char *at(const char *in)
@@ -173,7 +195,7 @@ static char *strlcpy(char *dest, const char *src, size_t n)
 	return dest;
 }
 
-/*
+/**
  * __hl_dtoi - build the HL.I-node path from the HL.D-node path
  */
 static void __hl_dtoi(char *dest, size_t destsize, const char *src)
@@ -190,7 +212,7 @@ static void __hl_dtoi(char *dest, size_t destsize, const char *src)
 
 #define hl_dtoi(dest, src) __hl_dtoi((dest), sizeof(dest), (src))
 
-/*
+/**
  * __real_to_hcb - build the hidden control block (HCB) path from a real path
  */
 static int __real_to_hcb(char *dest, size_t destsize, const char *src)
@@ -237,7 +259,7 @@ static int __real_to_hcb(char *dest, size_t destsize, const char *src)
 
 #define real_to_hcb(dest, src) __real_to_hcb((dest), sizeof(dest), (src))
 
-/*
+/**
  * ll_hcb_read - lowlevel read of HCB
  * @path:	path to HCB (used for debug and unlink)
  * @info:	destination structure
@@ -297,7 +319,7 @@ static int ll_hcb_read(const char *path, struct ll_hcb *info, int fd)
 	return -EINVAL;
 }
 
-/*
+/**
  * ll_hcb_write - lowlevel write of HCB
  * @path:	path to HCB (used for debug and unlink)
  * @info:	source structure
@@ -336,7 +358,7 @@ static int ll_hcb_write(const char *path, struct ll_hcb *info, int fd)
 	return 0;
 }
 
-/*
+/**
  * hcb_new - create new HCB
  * @path:	file path (not HCB path)
  * @cb:		destination structure
@@ -370,15 +392,15 @@ static int hcb_new(const char *path, struct hcb *cb, unsigned int reuse)
 	return 0;
 }
 
-/*
+/**
  * hcb_get - read HCB
- * @path:	L0 file path
+ * @path:	fuse-namespace relative file path (L0)
  * @cb:		destination struct
  *
- * Read @path's HCB into @cb. This does not follow hardlinks.
- * To distinguish whether @path or the HCB was not found, hcb_get() will
- * return -ENOENT when @path was not found, and -ENOENT_HCB when the HCB
- * was not found.
+ * Read @path's HCB into @cb. This function does not follow posixovl hardlinks.
+ * When the file given by @path was not found, -ENOENT will be returned, but if
+ * the HCB was not found, this funciton returns -ENOENT_HCB instead to indicate
+ * so.
  */
 static int hcb_get(const char *path, struct hcb *cb)
 {
@@ -431,7 +453,7 @@ static int hcb_get(const char *path, struct hcb *cb)
 	return 0;
 }
 
-/*
+/**
  * hcb_put - release HCB
  * @cb:	data
  *
@@ -446,7 +468,7 @@ static void hcb_put(const struct hcb *cb)
 	close(cb->fd);
 }
 
-/*
+/**
  * hcb_deref - dereference an S_IFHARDLNK HCB
  * @cb:	data
  *
@@ -502,7 +524,7 @@ static int hcb_deref(struct hcb *cb)
 	return 0;
 }
 
-/*
+/**
  * hcb_get_deref - shortcut for hcb_get()+hcb_deref()
  * @path:	virtual path
  * @cb:		destination structure
@@ -521,7 +543,7 @@ static int hcb_get_deref(const char *path, struct hcb *cb)
 	return 0;
 }
 
-/*
+/**
  * hcb_update - write HCB
  * @cb:	data
  *
@@ -551,7 +573,7 @@ static int hcb_update(struct hcb *cb)
 	return ret;
 }
 
-/*
+/**
  * hcb_lookup - shortcut for hcb_get()+hcb_put()
  * @path:	virtual path
  * @cb:		destination structure
@@ -569,7 +591,7 @@ static int hcb_lookup(const char *path, struct hcb *cb)
 	return 0;
 }
 
-/*
+/**
  * hcb_lookup_deref - shortcut for hcb_get_deref()+hcb_put()
  * @path:	virtual path
  * @cb:		destination structure
@@ -587,7 +609,7 @@ static int hcb_lookup_deref(const char *path, struct hcb *cb)
 	return 0;
 }
 
-/*
+/**
  * hcb_lookup_readdir -
  * @dir:	working directory
  * @name:	file
@@ -642,7 +664,7 @@ static __attribute__((pure)) bool is_resv(const char *path)
 	return is_resv_name(file);
 }
 
-/*
+/**
  * supports_owners - check whether @path can do that
  * @path:	path to existing file
  * @uid:	uid to change to (used for figuring out)
@@ -714,7 +736,7 @@ static bool supports_owners(const char *path, uid_t uid,
 	return __supports_owners(path, uid, gid, restore);
 }
 
-/*
+/**
  * supports_permissions - check whether @path can do that
  * @path:	existing path to file
  *
@@ -750,6 +772,14 @@ static bool supports_permissions(const char *path)
 	return __supports_permissions(path);
 }
 
+/**
+ * @read_ptr:	original to-disk filename
+ *
+ * Encode all the special characters that are invalid to use on VFAT by
+ * substituting each by "%(xx)", where xx is the textual hexadecimal
+ * representation. Returns a pointer to an allocated memory block containing
+ * the encoded result.
+ */
 static char *xfrm_to_disk(const char *read_ptr)
 {
 	unsigned int needed = 0;
@@ -804,6 +834,12 @@ static const unsigned char xfrm_table[] = {
 	['C'] = 12, ['D'] = 13, ['E'] = 14, ['F'] = 15,
 };
 
+/**
+ * @read_ptr:	original on-disk filename
+ *
+ * Decode a name that has the %(xx) special sequences in it and return a
+ * pointer to an allocated memory block with the result.
+ */
 static char *xfrm_from_disk(const char *read_ptr)
 {
 	const char *seek_ptr = read_ptr, *next;
@@ -911,7 +947,7 @@ static __attribute__((pure)) bool could_be_too_long(const char *path)
 	return strlen(path) + 1 + HCB_PREFIX_LEN >= PATH_MAX;
 }
 
-/*
+/**
  * parent_owner_match -
  * @path:	path, of which the parent is to be checked
  * @uid:	uid to test
@@ -991,7 +1027,7 @@ static int posixovl_ftruncate(const char *path, off_t length,
 	return retcode_int(ftruncate(filp->fh, length));
 }
 
-/*
+/**
  * hl_demote - collapse S_IFHARDLNK into normal file
  * @l0_file:
  * @l0_hcb:
@@ -1029,7 +1065,7 @@ static int hl_demote(const char *l0_file, const char *l0_hcb,
 	return ret;
 }
 
-/*
+/**
  * hl_try_demote - try to collapse a one-link hardlink net into one file
  * @path:	real path
  *
@@ -1109,7 +1145,7 @@ static void *posixovl_init(struct fuse_conn_info *conn)
 	return NULL;
 }
 
-/*
+/**
  * hl_promote - transform file into hardlink master
  * @l0_path:		path to real file
  * @orig_info:		L0 HCB
@@ -1195,7 +1231,7 @@ static int hl_promote(const char *l0_path, const struct hcb *orig_info,
 	return ret;
 }
 
-/*
+/**
  * hl_up_nlink - increase nlink count of hardlink master
  * @l1_path:	name of the L1 file
  *		(Could have used the L0 file, but using L1 saves a derefernce,
@@ -1215,7 +1251,7 @@ static int hl_up_nlink(const char *l1_path)
 	return hcb_update(&cb);
 }
 
-/*
+/**
  * hl_drop - drop nlink count of hardlink master
  * @l1_path:	name of the L1 file
  *
@@ -1249,7 +1285,7 @@ static int hl_drop(const char *l1_path)
 	return hcb_update(&cb);
 }
 
-/*
+/**
  * hl_instantiate -
  * @oldpath:
  * @newpath:
@@ -1785,7 +1821,7 @@ static int posixovl_unlink(const char *path)
 
 	/*
 	 * Need to unlink the real file first so that the potential case
-	 * "HCB non-existant but real file existant" does not happen in
+	 * "HCB non-existent but real file existent" does not happen in
 	 * readdir().
 	 */
 	h_ret = hcb_lookup(path, &info);

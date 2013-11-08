@@ -63,13 +63,13 @@ override these
 all lower-level files will be operated on/created with the user who inititated
 the mount
 .PP
-If no HCB exists for a file or directory, the default permissions are 644 and
-755, respectively. The owner and group of the inode will be the owner/group of
-the real file.
+If no HCB exists for a file or directory, the default permissions are rw-r--r--
+or rwxr-xr-x, respectively. The owner and group of the inode will be the
+owner/group of the real file.
 .PP
 Each non-regular, non-directory virtual file will have a zero-size real file.
 (Simplifies handling, and makes it apprarent the object exists when using other
-OS.)
+operating systems.)
 .PP
 `df` will show:
 .nf
