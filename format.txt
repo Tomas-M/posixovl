@@ -8,19 +8,22 @@ physical file := file as seen in the lower mount
 Summary
 
 State 0:
-	* dentry "hello.txt" represented using "hello.txt"
-	* inode contents stored in "hello.txt"
+	* dentry "subdir/hello.txt" represented using
+	  "subdir/hello.txt"
+	* inode contents stored in "subdir/hello.txt"
 	* inode metadata synthesized
 State 1:
-	* dentry "hello.txt" represented using "hello.txt"
-	* inode contents stored in "hello.txt"
-	* inode metadata stored in ".pxovl.hello.txt"
+	* dentry "subdir/hello.txt" represented using
+	  "subdir/hello.txt"
+	* inode contents stored in "subdir/hello.txt"
+	* inode metadata stored in "subdir/.pxovl.hello.txt"
 State 2:
-	* dentry "hello.txt" represented using "hello.txt" of size 0 and
-	  ".pxovl.hello.txt" containing "type S_IFLNK|S_ISVTX" (acts as
-	  S_IFHARDLINK) and the mention of ".pxovd.1234567890".
-	* inode metadata stored in ".pxovn.1234567890"
-	* inode contents stored in ".pxovd.1234567890"
+	* dentry "subdir/hello.txt" represented using
+	  "subdir/hello.txt" of size 0 and ".pxovl.hello.txt"
+	  containing "type S_IFLNK|S_ISVTX" (acts as S_IFHARDLINK)
+	  and the mention of "/.pxovd.1234567890".
+	* inode metadata stored in "/.pxovn.1234567890"
+	* inode contents stored in "/.pxovd.1234567890"
 
 
 State 0 - plain map
@@ -107,6 +110,11 @@ State 2 - data in a separate node
 
   (N.B.: They are implemented quite like symlinks, which differ
   only in the file type.)
+
+* The pxovd and pxovn files always live in the root directory of the
+  lower filesystem. (This is to ensure that the target of all
+  S_IFHARDLINK HCB files remains valid for all time, which would not
+  be possible if the pxovd file had to be moved.)
 
 * Deleting the dentry will delete both the 0-sized placeholder file
   and its HCB ("/lower/foo.txt" and "/lower/.pxovl.foo.txt" in our
