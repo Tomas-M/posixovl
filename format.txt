@@ -1,0 +1,119 @@
+Overview of posixovl file translation.
+
+
+logical file  := file as seen in the posixovl mount
+physical file := file as seen in the lower mount
+
+
+Summary
+
+State 0:
+	* dentry "hello.txt" represented using "hello.txt"
+	* inode contents stored in "hello.txt"
+	* inode metadata synthesized
+State 1:
+	* dentry "hello.txt" represented using "hello.txt"
+	* inode contents stored in "hello.txt"
+	* inode metadata stored in ".pxovl.hello.txt"
+State 2:
+	* dentry "hello.txt" represented using "hello.txt" of size 0 and
+	  ".pxovl.hello.txt" containing "type S_IFLNK|S_ISVTX" (acts as
+	  S_IFHARDLINK) and the mention of ".pxovd.1234567890".
+	* inode metadata stored in ".pxovn.1234567890"
+	* inode contents stored in ".pxovd.1234567890"
+
+
+State 0 - plain map
+
+* A single logical file or directory is represented in the lower
+  filesystem as a single file as well. For one logical file there is
+  exactly one physical file. (For example, "/posixovl/hello.txt" <-->
+  "/lower/hello.txt").
+
+* The file name in the lower filesystem may be encoded in an
+  implementation-specific fashion. There is a 1:1 (bijective) mapping
+  between logical filename and the filename of the physical file
+  holding the file contents. (For example, "/posixovl/hello*.txt"
+  <--> "/lower/hello%(2A).txt".)
+
+  (N.B.: The posixovl mount program implementation does not handle
+  all of the awkward corner cases. In particular, it does not try to
+  hide modifications outside of posixovl that would violate the
+  bijective property.)
+
+* The POSIX attributes shown in the logical filesystem are
+  unspecified and implementation-specific. (The posixovl mount
+  program will try to produce something sensible.)
+
+* POSIX attributes cannot be changed in state 0. (If this is
+  attempted, the mount program will create a HCB and transition the
+  file to state 1.)
+
+* The hardlink count cannot be changed in state 0. (The mount program
+  will advance the file to state 1.)
+
+
+State 1 - metadata present
+
+* HCB is the "hidden control block", a companion file in the lower
+  filesystem storing file type, permissions, owner/group, rdev,
+  symlink target, etc.
+
+* For each logical object, there will be two physical files
+  (the file with the contents and the HCB metadata file).
+
+* Like in state 0, there is a 1:1 mapping between a logical filename
+  and the filename of the physical file holding the contents.
+
+* There is a 1:1 mapping between a logical filename and the filename
+  of the HCB file.
+
+* For non-directories, the HCB is stored in parallel to the physical
+  file, for example "/lower/hello.txt" <-->
+  "/lower/.pxovl.hello.txt". Encoding rules apply as well, e.g.
+  "/lower/hello.txt" <--> "/lower/.pxovl.hello%(2A).txt".
+
+* For directories, the HCB is stored within the directory that it
+  describes, for example "/lower/pictures" <-->
+  "/lower/pictures/.pxovl.".
+
+* Deleting the logical file or directory will delete both content
+  file and the HCB file (as expected).
+
+* The hardlink count cannot be changed in state 1.
+  (If this is attempted, the mount program will do a conversion and
+  advance the file to state 2.)
+
+* There is no way back to state 0. (Other than perhaps manual
+  modifications in the lower filesystem outside of posixovl.)
+
+
+State 2 - data in a separate node
+
+* Directories have no state 2 defined, because it is not permitted to
+  hardlink them anyway.
+
+* The contents of a logical file are stored in a separate physical
+  file, "/lower/.pxovd.1234567890" (a random unique number is
+  chosen), and the inode metadata such as owner/group and permissions
+  is stored in "/lower/.pxovn.1234567890" (same number that was
+  chosen for the pxovd file).
+
+* A dentry such as "/posixovl/foo.txt" is represented using a
+  zero-sized file "/lower/foo.txt" and a metadata file
+  "/lower/.pxovl.foo.txt", the latter of which specifies file type
+  S_IFLNK|S_ISVTX (121000) to indicate a hardlink, and with the
+  target set to ".pxovd.1234567890".
+
+  (N.B.: They are implemented quite like symlinks, which differ
+  only in the file type.)
+
+* Deleting the dentry will delete both the 0-sized placeholder file
+  and its HCB ("/lower/foo.txt" and "/lower/.pxovl.foo.txt" in our
+  example).
+
+* Deleting the last reference (as determined by looking at the link
+  count field in the pxovn file) will eliminate the pxovd and pxovn
+  files.
+
+* There is no way back to state 1.
