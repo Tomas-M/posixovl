@@ -1,6 +1,6 @@
 /*
  *	posixovl - POSIX overlay filesystem
- *	Copyright © Jan Engelhardt <jengelh@medozas.de>, 2007 - 2008
+ *	Copyright Jan Engelhardt, 2007-2008,2013
  *
  *	Development of posixovl sponsored by Slax (http://www.slax.org/)
  *
@@ -1146,6 +1146,26 @@ static void *posixovl_init(struct fuse_conn_info *conn)
 }
 
 /**
+ * The size of the inode type may be larger than that of the type that rand()
+ * returns, so call rand() as often as needed to fill all bits.
+ * Minus 1 is used because it may be a signed integer whose sign is never set.
+ * So in the usual case of ino_t being 64 bit and int being 32 bit, we will
+ * call rand() thrice.
+ */
+static ino_t make_inum(void)
+{
+	static const unsigned int advance =
+		sizeof(__typeof__(rand())) * CHAR_BIT - 1;
+	ino_t ino = 0;
+
+	for (unsigned int b = 0; b < sizeof(ino) * CHAR_BIT; b += advance) {
+		ino <<= advance;
+		ino ^= rand();
+	}
+	return ino;
+}
+
+/**
  * hl_promote - transform file into hardlink master
  * @l0_path:		path to real file
  * @orig_info:		L0 HCB
@@ -1167,13 +1187,13 @@ static int hl_promote(const char *l0_path, const struct hcb *orig_info,
 	 */
 	work_sb.st_ino = orig_info->sb.st_ino;
 	do {
-		snprintf(l1_path, sizeof(l1_path), "/" HL_DNODE_PREFIX "%lu",
+		snprintf(l1_path, sizeof(l1_path), "/" HL_DNODE_PREFIX "%lx",
 			 static_cast(unsigned long, work_sb.st_ino));
-		snprintf(l1_hcb, sizeof(l1_hcb), "/" HL_INODE_PREFIX "%lu",
+		snprintf(l1_hcb, sizeof(l1_hcb), "/" HL_INODE_PREFIX "%lx",
 			 static_cast(unsigned long, work_sb.st_ino));
 		if (fstatat(root_fd, at(l1_path), &work_sb,
 		    AT_SYMLINK_NOFOLLOW) == 0) {
-			work_sb.st_ino = rand();
+			work_sb.st_ino = make_inum();
 			continue;
 		}
 		if (errno == ENOENT)
