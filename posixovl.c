@@ -129,7 +129,7 @@ struct hcb {
 
 /* Global */
 static mode_t default_mode = S_IRUGO | S_IWUSR;
-static unsigned int assume_vfat, single_threaded;
+static unsigned int assume_vfat, single_threaded, hardlink_with_copy;
 static const char *root_dir;
 static int root_fd;
 static pthread_mutex_t posixovl_protect = PTHREAD_MUTEX_INITIALIZER;
@@ -1145,6 +1145,22 @@ static void *posixovl_init(struct fuse_conn_info *conn)
 	return NULL;
 }
 
+static int posixovl_fcopy(int dfd, const char *source)
+{
+	int sfd = open(source, O_RDONLY);
+	ssize_t ret;
+	char buffer[65536];
+
+	if (sfd < 0)
+		return -errno;
+	while ((ret = read(sfd, buffer, sizeof(buffer))) > 0)
+		if (write(dfd, buffer, ret) < 0) {
+			ret = -errno;
+			break;
+		}
+	return ret;
+}
+
 /**
  * The size of the inode type may be larger than that of the type that rand()
  * returns, so call rand() as often as needed to fill all bits.
@@ -1166,7 +1182,7 @@ static ino_t make_inum(void)
 }
 
 /**
- * hl_promote - transform file into hardlink master
+ * hl_promote - transform state 0/1 file into hardlink master (state 2)
  * @l0_path:		path to real file
  * @orig_info:		L0 HCB
  * @l0_hcb_exists:	what it says
@@ -1237,7 +1253,8 @@ static int hl_promote(const char *l0_path, const struct hcb *orig_info,
 		ret = -errno;
 		goto out3;
 	}
-
+	if (hardlink_with_copy)
+		posixovl_fcopy(fd, new_info.ll.new_target);
 	close(fd);
 	return 0;
 
@@ -1306,11 +1323,9 @@ static int hl_drop(const char *l1_path)
 }
 
 /**
- * hl_instantiate -
+ * hl_instantiate - make (another) hardlink
  * @oldpath:
  * @newpath:
- *
- * This is perhaps the most expensive operation among all.
  */
 static int hl_instantiate(const char *oldpath, const char *newpath)
 {
@@ -1322,12 +1337,13 @@ static int hl_instantiate(const char *oldpath, const char *newpath)
 	if (ret == -ENOENT_HCB || (ret == 0 && !S_ISHARDLNK(cb_old.ll.mode))) {
 		/*
 		 * If no HCB attached or if not a hardlink slave...
+		 * Transform file from state 0/1 to 2.
 		 */
 		if ((ret = hl_promote(oldpath, &cb_old,
 		    ret != -ENOENT_HCB)) < 0)
 			goto unlock_and_out;
 		/*
-		 * Relookup to get the L1 file path
+		 * Relookup to get the dnode file path
 		 */
 		if ((ret = hcb_lookup(oldpath, &cb_old)) < 0)
 			goto unlock_and_out;
@@ -1356,7 +1372,8 @@ static int hl_instantiate(const char *oldpath, const char *newpath)
 		ret = -errno;
 		goto out2;
 	}
-
+	if (hardlink_with_copy)
+		posixovl_fcopy(fd, cb_new.ll.new_target);
 	close(fd);
 	return 0;
 
@@ -1980,7 +1997,7 @@ static const struct fuse_operations posixovl_ops = {
 static void usage(const char *p)
 {
 	fprintf(stderr,
-	        "Usage: %s [-F] [-S source] mountpoint [-- fuseoptions]\n", p);
+	        "Usage: %s [-FH] [-S source] mountpoint [-- fuseoptions]\n", p);
 	exit(EXIT_FAILURE);
 }
 
@@ -1990,13 +2007,16 @@ int main(int argc, char **argv)
 	int new_argc = 0, original_wd, c;
 	char xargs[256];
 
-	while ((c = getopt(argc, argv, "1FS:")) > 0) {
+	while ((c = getopt(argc, argv, "1FHS:")) > 0) {
 		switch (c) {
 			case '1':
 				single_threaded = true;
 				break;
 			case 'F':
 				assume_vfat = true;
+				break;
+			case 'H':
+				hardlink_with_copy = true;
 				break;
 			case 'S':
 				root_dir = optarg;

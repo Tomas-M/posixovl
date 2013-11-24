@@ -4,7 +4,7 @@
 posixovl \(em The POSIX Overlay Filesystem
 .SH Syntax
 .PP
-\fBmount.posixovl\fP [\fB\-F\fP] [\fB\-S\fP \fIsource_dir\fP] \fItarget_dir\fP
+\fBmount.posixovl\fP [\fB\-FH\fP] [\fB\-S\fP \fIsource_dir\fP] \fItarget_dir\fP
 [\fB\-\-\fP \fIfuse_opts\fP]
 .SH Description
 .PP
@@ -25,6 +25,12 @@ Disable permission and ownership checks on the lower filesystem. Normally these
 would be used to check for POSIX filesystems mounted inside a non-POSIX
 tree. (For example, where /vfat is vfat, and /vfat/xfs is a POSIX-behaving
 filesystem.)
+.TP
+\fB\-H\fP
+When this option is enabled and a hardlink in the posixovl namespace is
+created, the contents of the file will be replicated in the lower filesystem
+rather than using zero-sized placeholder files. Note that the replicas will not
+be updated later on when editing the inode through posixovl.
 .SH Supported operations
 .PP
 posixovl will emulate the following calls if the lower filesystem is incapable
