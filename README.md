@@ -104,3 +104,6 @@ Authors
        posixovl and this manpage were written by Jan Engelhardt.
 
        Development of posixovl was sponsored by Slax (http://www.slax.org/).
+
+       This github repository is a fork of
+       https://sourceforge.net/p/posixovl/posixovl
