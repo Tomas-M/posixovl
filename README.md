@@ -1,13 +1,13 @@
-** posixovl — The POSIX Overlay Filesystem **
-
+posixovl — The POSIX Overlay Filesystem
+=======================================
 
 Syntax
-======
+------
 
        mount.posixovl [-FH] [-S source_dir] target_dir [-- fuse_opts]
 
 Description
-===========
+-----------
 
        posixovl  provides a filesystem view that supports various POSIX opera‐
        tions while using an otherwise incapable lower filesystem.  Filesystems
@@ -18,7 +18,7 @@ Description
        actual use of doing that remains to be discovered.
 
 Options
-=======
+-------
 
        If  no  source  directory is given, the target directory specifies both
        source and target (mountpoint), yielding an "overmount".
@@ -35,7 +35,7 @@ Options
               later on when editing the inode through posixovl.
 
 Supported operations
-====================
+--------------------
 
        posixovl  will  emulate  the following calls if the lower filesystem is
        incapable of supporting these operations:
@@ -62,7 +62,7 @@ Supported operations
        ·   Case-sensitivity
 
 Notes
-=====
+-----
 
        Using  posixovl  on  an  already  POSIX-behaving  filesystem (e.g. XFS)
        incurs some issues, since detecting whether a path is POSIX behaving or
@@ -99,7 +99,7 @@ Notes
        $ mount -t vfat /dev/hda1 /windows/D -o check=s,shortname=mixed
 
 Authors
-=======
+-------
 
        posixovl and this manpage were written by Jan Engelhardt.
 
